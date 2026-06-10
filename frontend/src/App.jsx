@@ -8,7 +8,7 @@ function App() {
 
     const [stations, setStations]           = useState([]);
     const [query, setQuery]                 = useState("");
-    const [loading, setLoading]             = useState(false);
+    const [loading, setLoading]             = useState(true);
     const [error, setError]                 = useState(null);
     const [selectedStation, setSelectedStation] = useState(null);
     const [profileFile, setProfileFile]     = useState(null);
@@ -16,22 +16,41 @@ function App() {
     // ----------------------------------------
     // LOAD STATIONS
     // ----------------------------------------
-    const loadStations = useCallback(() => {
-        setLoading(true);
-        setError(null);
-
+    const fetchStations = useCallback(() => (
         fetch("http://localhost:8000/load-meta", { method: "POST" })
             .then(res => res.json())
             .then(() => fetch("http://localhost:8000/stations"))
             .then(res => res.json())
+    ), []);
+
+    const loadStations = useCallback(() => {
+        setLoading(true);
+        setError(null);
+
+        fetchStations()
             .then(data => setStations(data.stations || []))
             .catch(() => setError("Failed to load stations. Is the server running?"))
             .finally(() => setLoading(false));
-    }, []);
+    }, [fetchStations]);
 
     useEffect(() => {
-        loadStations();
-    }, [loadStations]);
+        let cancelled = false;
+
+        fetchStations()
+            .then(data => {
+                if (!cancelled) setStations(data.stations || []);
+            })
+            .catch(() => {
+                if (!cancelled) setError("Failed to load stations. Is the server running?");
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [fetchStations]);
 
     // ----------------------------------------
     // SEARCH FILTER
@@ -63,7 +82,6 @@ function App() {
                     error={error}
                     onRefresh={loadStations}
                     selectedStation={selectedStation}
-                    onOpenProfile={setProfileFile}
                 />
 
                 <div className="map-container">

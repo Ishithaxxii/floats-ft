@@ -1,4 +1,0 @@
-Ship,Cruise ID,Station,Latitude,Longitude,Start Time,Parameters,TraceID,folderpath_filename
-NaN,NaN,NaN,NA,NA,Nov 14 2010 02:33:53,"depSM, prDM, c0S/m, t090C, sal00, svCM, flECO-AFL, sbeox0ML/L, oxsatML/L, flag",NA_NA_NA_NA_Nov14201002-33-53_CTD_02.cnv,CTD_02.cnv
-NaN,NaN,NaN,NA,NA,Nov 13 2010 23:03:53,"depSM, prDM, c0S/m, t090C, sal00, svCM, flECO-AFL, sbeox0ML/L, oxsatML/L, flag",NA_NA_NA_NA_Nov13201023-03-53_CTD_01.cnv,CTD_01.cnv
-NaN,NaN,NaN,NA,NA,Nov 14 2010 06:03:53,"depSM, prDM, c0S/m, t090C, sal00, svCM, flECO-AFL, sbeox0ML/L, oxsatML/L, flag",NA_NA_NA_NA_Nov14201006-03-53_CTD_03.cnv,CTD_03.cnv

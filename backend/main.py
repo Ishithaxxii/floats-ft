@@ -6,7 +6,7 @@ import re
 import sqlite3
 import pandas as pd
 
-from meta_processor import standardize_ship_name  # import just the function
+from meta_processor import infer_ship_from_metadata
 
 
 # ==========================================
@@ -33,16 +33,9 @@ PROJECT_ROOT = os.path.dirname(BASE_DIR)
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
-UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads/cnv_files")
-
 # ==========================================
 # PATHS
 # ==========================================
-
-CNV_FOLDER = os.path.join(
-    BASE_DIR,
-    "uploads/cnv_files"
-)
 
 CTD_DATA_FILE = os.environ.get(
     "SEASNAP_CTD_DATA_FILE",
@@ -58,29 +51,19 @@ CTD_CACHE_DB = os.environ.get(
     os.path.join(CACHE_DIR, "ctd_profiles.sqlite")
 )
 
-BATHYMETRY_FILE = os.path.join(
-    DATA_DIR,
-    "ETOPO1_Bed_g_geotiff.tif"
-)
-
-PLOTS_FOLDER = os.path.join(
-    BASE_DIR,
-    "plots"
-)
 print(BASE_DIR)
 print(PROJECT_ROOT)
 print(DATA_DIR)
-print(UPLOAD_FOLDER)
-print(CNV_FOLDER)
 print(CTD_DATA_FILE)
-print(BATHYMETRY_FILE)
 
 
 CURRENT_META_DF = None
 
 uploaded_stations = []
+
 META_FOLDER = os.environ.get(
     "SEASNAP_META_FOLDER",
+    # os.path.join(PROJECT_ROOT, "meta").
     "/home/ishitha/Desktop/meta_csv"
 )
 
@@ -99,9 +82,31 @@ CTD_PROFILE_COLUMNS = {
     "sbeox0ML/L": "sbeox0ML/L",
     "SourceFile": "SourceFile",
     "folderpath_filename": "SourceFile",
+    "Temp_QC": "Temp_QC",
+    "Sal_QC": "Sal_QC",
+    "Pres_QC": "Pres_QC",
+    "ALL_TESTS_QC": "ALL_TESTS_QC",
 }
 
-CTD_OUTPUT_COLUMNS = ["depSM", "t090C", "Sal00", "c0S/m", "sigma-t00", "sbeox0ML/L"]
+CTD_OUTPUT_COLUMNS = [
+    "depSM",
+
+    "t090C",
+    "Temp_QC",
+
+    "Sal00",
+    "Sal_QC",
+
+    "c0S/m",
+
+    "sigma-t00",
+
+    "sbeox0ML/L",
+
+    "Pres_QC",
+
+    "ALL_TESTS_QC",
+]
 
 
 def resolve_ctd_data_file():
@@ -154,12 +159,24 @@ def ensure_ctd_cache():
         conn.execute("""
             CREATE TABLE profiles (
                 stem TEXT NOT NULL,
+
                 depSM REAL,
+
                 t090C REAL,
+                Temp_QC INTEGER,
+
                 Sal00 REAL,
+                Sal_QC INTEGER,
+
                 "c0S/m" REAL,
+
                 "sigma-t00" REAL,
-                "sbeox0ML/L" REAL
+
+                "sbeox0ML/L" REAL,
+
+                Pres_QC INTEGER,
+
+                ALL_TESTS_QC INTEGER
             )
         """)
         conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
@@ -228,9 +245,18 @@ def load_meta():
     global uploaded_stations
     uploaded_stations = []
 
-    meta_folder = META_FOLDER
-    if not os.path.isdir(meta_folder):
-        meta_folder = os.path.join(BASE_DIR, "meta")
+    meta_folder = next(
+        (
+            folder
+            for folder in [
+                META_FOLDER,
+                os.path.join(PROJECT_ROOT, "meta"),
+                os.path.join(BASE_DIR, "meta"),
+            ]
+            if os.path.isdir(folder)
+        ),
+        META_FOLDER,
+    )
 
     csv_files = [
         os.path.join(meta_folder, f)
@@ -260,6 +286,17 @@ def load_meta():
         "Depth": "Station Depth",
         "Station": "Station Number",
     })
+
+    coalesced_columns = {}
+    for col in ["Latitude_decimal", "Longitude_decimal", "Station Depth", "Station Number"]:
+        duplicate_cols = df.loc[:, df.columns == col]
+        if duplicate_cols.shape[1] > 1:
+            coalesced_columns[col] = duplicate_cols.bfill(axis=1).iloc[:, 0]
+
+    if coalesced_columns:
+        df = df.loc[:, ~df.columns.duplicated()]
+        for col, values in coalesced_columns.items():
+            df[col] = values
 
     # ----------------------------------------
     # CLEAN COORDINATES
@@ -300,7 +337,7 @@ def load_meta():
             uploaded_stations.append({
                 "latitude":    float(row["Latitude_decimal"]),
                 "longitude":   float(row["Longitude_decimal"]),
-                "ship":        standardize_ship_name(row.get("Ship", "N/A")),
+                "ship":        infer_ship_from_metadata(row),
                 "cruise":      str(row.get("Cruise", "N/A")),
                 "station":     str(row.get("Station Number", "N/A")),
                 "datetime":    str(row.get("Datetime", "N/A")),
@@ -343,15 +380,28 @@ def get_profile_data(station_file: str):
     query = """
         SELECT
             depSM,
+
             t090C,
+            Temp_QC,
+
             Sal00,
+            Sal_QC,
+
             "c0S/m",
+
             "sigma-t00",
-            "sbeox0ML/L"
+
+            "sbeox0ML/L",
+
+            Pres_QC,
+
+            ALL_TESTS_QC
+
         FROM profiles
         WHERE stem = ?
         ORDER BY depSM
     """
+    #print(rows[0].keys())
 
     with sqlite3.connect(CTD_CACHE_DB) as conn:
         conn.row_factory = sqlite3.Row

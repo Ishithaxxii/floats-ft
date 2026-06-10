@@ -5,7 +5,7 @@
 // ==========================================
 // STATION DETAILS
 // ==========================================
-function StationDetails({ station, onOpenProfile }) {
+function StationDetails({ station}) {
     if (!station) {
         return (
             <div className="details-card empty">
@@ -15,33 +15,7 @@ function StationDetails({ station, onOpenProfile }) {
         );
     }
 
-    const hasProfile =
-        station.file_name &&
-        station.file_name !== "N/A" &&
-        station.file_name !== "nan";
 
-    return (
-        <div className="details-card">
-            <h3>Details</h3>
-            <dl>
-                <div><dt>Station</dt><dd>{station.station || "N/A"}</dd></div>
-                <div><dt>Ship</dt><dd>{station.ship || "N/A"}</dd></div>
-                <div><dt>Cruise</dt><dd>{station.cruise || "N/A"}</dd></div>
-                <div><dt>Datetime</dt><dd>{station.datetime || "N/A"}</dd></div>
-                <div><dt>Depth</dt><dd>{station.depth || "N/A"}</dd></div>
-                <div><dt>Latitude</dt><dd>{Number(station.latitude).toFixed(4)}</dd></div>
-                <div><dt>Longitude</dt><dd>{Number(station.longitude).toFixed(4)}</dd></div>
-                <div><dt>File</dt><dd>{station.file_name || "N/A"}</dd></div>
-            </dl>
-            <button
-                type="button"
-                onClick={() => onOpenProfile(station.file_name)}
-                disabled={!hasProfile}
-            >
-                View Profile
-            </button>
-        </div>
-    );
 }
 
 // ==========================================
@@ -56,7 +30,6 @@ function Sidebar({
     error,
     onRefresh,
     selectedStation,
-    onOpenProfile,
 }) {
     return (
         <aside className="dashboard-sidebar">
@@ -104,7 +77,6 @@ function Sidebar({
                 {/* ---------------------------------- */}
                 <StationDetails
                     station={selectedStation}
-                    onOpenProfile={onOpenProfile}
                 />
 
             </div>

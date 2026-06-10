@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-    LineChart, Line, XAxis, YAxis,
-    CartesianGrid, Tooltip, ResponsiveContainer, Label
+    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Label
 } from "recharts";
 
 // ==========================================
@@ -10,12 +9,14 @@ import {
 const PLOT_CONFIGS = [
     {
         key: "t090C",
+        qcKey: "Temp_QC",
         label: "Temperature (°C)",
         color: "#e74c3c",
         title: "Temperature Profile"
     },
     {
         key: "Sal00",
+        qcKey: "Sal_QC",
         label: "Salinity (PSU)",
         color: "#3498db",
         title: "Salinity Profile"
@@ -40,6 +41,15 @@ const PLOT_CONFIGS = [
     }
 ];
 
+
+const QC_COLORS = {
+1: "#2ecc71",
+2: "#f1c40f",
+3: "#e67e22",
+4: "#e74c3c",
+9: "#95a5a6"
+};
+
 // ==========================================
 // SINGLE DEPTH PROFILE CHART
 // ==========================================
@@ -49,34 +59,99 @@ function DepthProfile({ data, config }) {
         .filter(d => d[config.key] != null)
         .sort((a, b) => b.depSM - a.depSM);
 
+    const qcField = config.qcKey;
+    
+    const [selectedQC, setSelectedQC] = useState({
+        1: false,
+        2: false,
+        3: false,
+        4: false,
+        9: false,
+        all : false 
+    });
+    // const sorted = [...data]
+    // .filter(d => d[config.key] != null)
+    // .sort((a, b) => a.depSM - b.depSM);
+
     if (sorted.length === 0) return null;
 
     const maxDepth = Math.max(...sorted.map(d => d.depSM));
 
+    const tickStep =
+    maxDepth <= 100 ? 10 :
+    maxDepth <= 500 ? 50 :
+    maxDepth <= 2000 ? 100 :
+    500;
+
+    const yTicks = [];
+
+    for (let d = 0; d <= maxDepth; d += tickStep) {
+        yTicks.push(d);
+    }
+
     return (
         <div className="profile-chart-card">
+            <div className="qc-panel">
+                <h4> QC </h4>
+                {[1,2,3,4,9].map(qc => (
+                    <label
+                        key={qc}
+                        className="qc-checkbox"
+                        style={{
+                            borderColor: QC_COLORS[qc]
+                        }}
+                    >
+                        <input
+                            type="checkbox"
+                            checked={selectedQC[qc]}
+                            onChange={() =>
+                                setSelectedQC(prev => ({
+                                    ...prev,
+                                    [qc]: !prev[qc]
+                                }))
+                            }
+                        />
+
+                        <span
+                            className="qc-color"
+                            style={{
+                                background: QC_COLORS[qc]
+                            }}
+                        />
+                        {qc}
+
+
+                    </label>
+                ))}
+
+            </div>
             <h4 className="chart-title">{config.title}</h4>
-            <ResponsiveContainer width="100%" height={350}>
+            <ResponsiveContainer width="100%" height={400}>
                 <LineChart
                     data={sorted}
                     layout="vertical"
                     margin={{ top: 10, right: 20, bottom: 30, left: 60 }}
                 >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                    <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="#444"
+                        vertical={false}
+                    />
 
                     <XAxis
                         type="number"
                         dataKey={config.key}
                         stroke="#aaa"
-                        tick={{ fill: "#aaa", fontSize: 11 }}
+                        tick={{ fill: "#aaa", fontSize: 14 }}
                         domain={["auto", "auto"]}
+                        //reversed = {true}
                     >
                         <Label
                             value={config.label}
                             position="insideBottom"
                             offset={-15}
                             fill="#aaa"
-                            fontSize={12}
+                            fontSize={16}
                         />
                     </XAxis>
 
@@ -84,10 +159,12 @@ function DepthProfile({ data, config }) {
                         type="number"
                         dataKey="depSM"
                         domain={[0, maxDepth]}
-                        reversed={true}
+                        reversed
+                        ticks={yTicks}
                         stroke="#aaa"
-                        tick={{ fill: "#aaa", fontSize: 11 }}
-                        width={55}
+                        tick={{ fill: "#aaa", fontSize: 14 }}
+                        width={75}
+                        padding={{ top: 10, bottom: 10 }}
                     >
                         <Label
                             value="Depth (m)"
@@ -95,7 +172,7 @@ function DepthProfile({ data, config }) {
                             position="insideLeft"
                             offset={-10}
                             fill="#aaa"
-                            fontSize={12}
+                            fontSize={16}
                         />
                     </YAxis>
 
@@ -103,7 +180,8 @@ function DepthProfile({ data, config }) {
                         contentStyle={{
                             background: "#1e1e2e",
                             border: "1px solid #444",
-                            borderRadius: 6
+                            borderRadius: 6,
+                            fontSize: "14px"
                         }}
                         labelFormatter={(val) => `Depth: ${val} m`}
                         formatter={(val) => [`${val}`, config.label]}
@@ -113,8 +191,30 @@ function DepthProfile({ data, config }) {
                         type="monotone"
                         dataKey={config.key}
                         stroke={config.color}
-                        dot={false}
                         strokeWidth={2}
+                        dot={(props) => {
+
+                            if (!qcField) return null;
+
+                            const point = props.payload;
+
+                            const qc = Number(point[qcField]);
+
+                            if (!selectedQC[qc]) {
+                                return null;
+                            }
+
+                            return (
+                                <circle
+                                    cx={props.cx}
+                                    cy={props.cy}
+                                    r={5}
+                                    fill={QC_COLORS[qc]}
+                                    stroke="#fff"
+                                    strokeWidth={1}
+                                />
+                            );
+                        }}
                     />
                 </LineChart>
             </ResponsiveContainer>
@@ -127,24 +227,47 @@ function DepthProfile({ data, config }) {
 // ==========================================
 function ProfilePlots({ stationFile, onClose }) {
 
-    const [profileData, setProfileData] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+    const [profileResult, setProfileResult] = useState({
+        stationFile: null,
+        data: [],
+        error: null
+    });
 
     useEffect(() => {
         if (!stationFile) return;
-        setLoading(true);
-        setError(null);
+        let cancelled = false;
 
         fetch(`http://localhost:8000/profile/${encodeURIComponent(stationFile)}`)
             .then(res => res.json())
             .then(data => {
                 if (data.error) throw new Error(data.error);
-                setProfileData(data);
+                if (!cancelled) {
+                    setProfileResult({
+                        stationFile,
+                        data,
+                        error: null
+                    });
+                }
             })
-            .catch(err => setError(err.message))
-            .finally(() => setLoading(false));
+            .catch(err => {
+                if (!cancelled) {
+                    setProfileResult({
+                        stationFile,
+                        data: [],
+                        error: err.message
+                    });
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
     }, [stationFile]);
+
+    const isCurrentProfile = profileResult.stationFile === stationFile;
+    const loading = Boolean(stationFile) && !isCurrentProfile;
+    const error = isCurrentProfile ? profileResult.error : null;
+    const profileData = isCurrentProfile ? profileResult.data : [];
 
     const availablePlots = PLOT_CONFIGS.filter(cfg =>
         profileData.some(d => d[cfg.key] != null)

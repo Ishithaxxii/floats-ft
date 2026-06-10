@@ -30,5 +30,9 @@ node_modules/
 dist/
 EOF
 
-data/ETOPO1_Bed_g_geotiff.tif
-data/Outside_EEZ_CTD_QC.csv
+# data/ETOPO1_Bed_g_geotiff.tif
+# data/Outside_EEZ_CTD_QC.csv
+
+backend/EEZ.shp
+backend/EEZ.shx
+backend/convert.py
