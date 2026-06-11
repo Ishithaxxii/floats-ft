@@ -2,20 +2,21 @@ import { useEffect, useState } from "react";
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Label
 } from "recharts";
+import TSDiagram from "./TSDiagram";
 
 // ==========================================
 // PLOT CONFIGS
 // ==========================================
 const PLOT_CONFIGS = [
     {
-        key: "t090C",
+        key: "TEMP_QC_VAR",
         qcKey: "Temp_QC",
         label: "Temperature (°C)",
         color: "#e74c3c",
         title: "Temperature Profile"
     },
     {
-        key: "Sal00",
+        key: "SAL_QC_VAR",
         qcKey: "Sal_QC",
         label: "Salinity (PSU)",
         color: "#3498db",
@@ -184,7 +185,10 @@ function DepthProfile({ data, config }) {
                             fontSize: "14px"
                         }}
                         labelFormatter={(val) => `Depth: ${val} m`}
-                        formatter={(val) => [`${val}`, config.label]}
+                         formatter={(value, name, props) => [
+                            value,
+                            `${config.label} (QC ${props.payload[qcField]})`
+                        ]}
                     />
 
                     <Line
@@ -296,8 +300,12 @@ function ProfilePlots({ stationFile, onClose }) {
                 {error && (
                     <p className="profile-status error">Error: {error}</p>
                 )}
-
+                
                 {!loading && !error && (
+                   <>
+                   <div className="profile-ts-section">
+                        <TSDiagram data={profileData} />
+                    </div>
                     <div className="profile-charts-grid">
                         {availablePlots.length === 0
                             ? <p className="profile-status">No plottable data found.</p>
@@ -310,6 +318,7 @@ function ProfilePlots({ stationFile, onClose }) {
                             ))
                         }
                     </div>
+                    </>
                 )}
 
             </div>

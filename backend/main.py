@@ -63,38 +63,61 @@ uploaded_stations = []
 
 META_FOLDER = os.environ.get(
     "SEASNAP_META_FOLDER",
-    # os.path.join(PROJECT_ROOT, "meta").
     "/home/ishitha/Desktop/meta_csv"
 )
 
+# ==========================================
+# COLUMN MAPPINGS
+# ==========================================
+# Maps every possible source column name → internal canonical name.
+# TEMP_QC_VAR and SAL_QC_VAR are now the canonical names for
+# QC-flagged temperature and salinity.
+
 CTD_PROFILE_COLUMNS = {
-    "Depth (m)": "depSM",
-    "depSM": "depSM",
-    "Temp-90 (deg C)": "t090C",
-    "t090C": "t090C",
-    "Sal00 (psu)": "Sal00",
-    "Sal00": "Sal00",
-    "Conductivity (S/m)": "c0S/m",
-    "c0S/m": "c0S/m",
-    "Sigma-t": "sigma-t00",
-    "sigma-t00": "sigma-t00",
-    "DO (ml/l)": "sbeox0ML/L",
-    "sbeox0ML/L": "sbeox0ML/L",
-    "SourceFile": "SourceFile",
-    "folderpath_filename": "SourceFile",
-    "Temp_QC": "Temp_QC",
-    "Sal_QC": "Sal_QC",
-    "Pres_QC": "Pres_QC",
-    "ALL_TESTS_QC": "ALL_TESTS_QC",
+    # Depth
+    "Depth (m)":            "depSM",
+    "depSM":                "depSM",
+
+    # Temperature  ← NOW maps to TEMP_QC_VAR
+    "Temp-90 (deg C)":      "TEMP_QC_VAR",
+    "t090C":                "TEMP_QC_VAR",
+    "TEMP_QC_VAR":          "TEMP_QC_VAR",
+
+    # Salinity  ← NOW maps to SAL_QC_VAR
+    "Sal00 (psu)":          "SAL_QC_VAR",
+    "Sal00":                "SAL_QC_VAR",
+    "SAL_QC_VAR":           "SAL_QC_VAR",
+
+    # Conductivity
+    "Conductivity (S/m)":   "c0S/m",
+    "c0S/m":                "c0S/m",
+
+    # Density
+    "Sigma-t":              "sigma-t00",
+    "sigma-t00":            "sigma-t00",
+
+    # Dissolved oxygen
+    "DO (ml/l)":            "sbeox0ML/L",
+    "sbeox0ML/L":           "sbeox0ML/L",
+
+    # Source tracking
+    "SourceFile":           "SourceFile",
+    "folderpath_filename":  "SourceFile",
+
+    # QC flags
+    "Temp_QC":              "Temp_QC",
+    "Sal_QC":               "Sal_QC",
+    "Pres_QC":              "Pres_QC",
+    "ALL_TESTS_QC":         "ALL_TESTS_QC",
 }
 
 CTD_OUTPUT_COLUMNS = [
     "depSM",
 
-    "t090C",
+    "TEMP_QC_VAR",   # ← was t090C
     "Temp_QC",
 
-    "Sal00",
+    "SAL_QC_VAR",    # ← was Sal00
     "Sal_QC",
 
     "c0S/m",
@@ -162,19 +185,19 @@ def ensure_ctd_cache():
 
                 depSM REAL,
 
-                t090C REAL,
-                Temp_QC INTEGER,
+                TEMP_QC_VAR REAL,
+                Temp_QC     INTEGER,
 
-                Sal00 REAL,
-                Sal_QC INTEGER,
+                SAL_QC_VAR REAL,
+                Sal_QC     INTEGER,
 
-                "c0S/m" REAL,
+                "c0S/m"      REAL,
 
-                "sigma-t00" REAL,
+                "sigma-t00"  REAL,
 
                 "sbeox0ML/L" REAL,
 
-                Pres_QC INTEGER,
+                Pres_QC      INTEGER,
 
                 ALL_TESTS_QC INTEGER
             )
@@ -185,15 +208,18 @@ def ensure_ctd_cache():
         for chunk in pd.read_csv(
             csv_path,
             usecols=lambda col: col.strip() in usecols,
-            chunksize=100000,
+            chunksize=100_000,
             low_memory=False,
         ):
             chunk.columns = chunk.columns.str.strip()
             chunk = chunk.rename(columns=CTD_PROFILE_COLUMNS)
+
+            # Keep the last duplicate — preserves the actual TEMP_QC_VAR/SAL_QC_VAR columns
+            chunk = chunk.loc[:, ~chunk.columns.duplicated(keep="last")]
+
             if "SourceFile" not in chunk.columns:
-                raise ValueError(
-                    "CTD CSV needs either SourceFile or folderpath_filename"
-                )
+                raise ValueError("CTD CSV needs either SourceFile or folderpath_filename")
+
             chunk["stem"] = (
                 chunk["SourceFile"]
                 .astype(str)
@@ -203,14 +229,11 @@ def ensure_ctd_cache():
                 .str.lower()
             )
 
-            keep_cols = ["stem"] + CTD_OUTPUT_COLUMNS
-            for col in CTD_OUTPUT_COLUMNS:
-                if col not in chunk.columns:
-                    chunk[col] = None
-            chunk = chunk[keep_cols]
+            chunk = chunk.reindex(columns=["stem"] + CTD_OUTPUT_COLUMNS)
+
             for col in CTD_OUTPUT_COLUMNS:
                 chunk[col] = pd.to_numeric(chunk[col], errors="coerce")
-
+                
             chunk = chunk.dropna(subset=["stem", "depSM"])
             chunk.to_sql("profiles", conn, if_exists="append", index=False)
             total_rows += len(chunk)
@@ -230,7 +253,9 @@ def ensure_ctd_cache():
     return csv_path
 
 
-# # API ENDPOINT
+# ==========================================
+# API ENDPOINTS
+# ==========================================
 
 @app.get("/stations")
 def get_stations():
@@ -239,9 +264,9 @@ def get_stations():
         load_meta()
     return {"stations": uploaded_stations}
 
+
 @app.post("/load-meta")
 def load_meta():
-
     global uploaded_stations
     uploaded_stations = []
 
@@ -281,12 +306,13 @@ def load_meta():
     df = pd.concat(all_dfs, ignore_index=True)
 
     df = df.rename(columns={
-        "Latitude(decimal)": "Latitude_decimal",
+        "Latitude(decimal)":  "Latitude_decimal",
         "Longitude(decimal)": "Longitude_decimal",
-        "Depth": "Station Depth",
-        "Station": "Station Number",
+        "Depth":              "Station Depth",
+        "Station":            "Station Number",
     })
 
+    # Coalesce duplicate columns (keep first non-null value)
     coalesced_columns = {}
     for col in ["Latitude_decimal", "Longitude_decimal", "Station Depth", "Station Number"]:
         duplicate_cols = df.loc[:, df.columns == col]
@@ -298,20 +324,10 @@ def load_meta():
         for col, values in coalesced_columns.items():
             df[col] = values
 
-    # ----------------------------------------
-    # CLEAN COORDINATES
-    # ----------------------------------------
-    df["Latitude_decimal"] = pd.to_numeric(
-        df["Latitude_decimal"], errors="coerce"
-    )
-    df["Longitude_decimal"] = pd.to_numeric(
-        df["Longitude_decimal"], errors="coerce"
-    )
+    # Clean and validate coordinates
+    df["Latitude_decimal"] = pd.to_numeric(df["Latitude_decimal"], errors="coerce")
+    df["Longitude_decimal"] = pd.to_numeric(df["Longitude_decimal"], errors="coerce")
     df = df.dropna(subset=["Latitude_decimal", "Longitude_decimal"])
-
-    # ----------------------------------------
-    # FILTER VALID COORDS
-    # ----------------------------------------
     df = df[
         df["Latitude_decimal"].between(-90, 90) &
         df["Longitude_decimal"].between(-180, 180)
@@ -319,20 +335,17 @@ def load_meta():
 
     print(f"Valid stations after cleaning: {len(df)}")
 
-    
-    # ----------------------------------------
-    # BUILD STATIONS LIST
-    # ----------------------------------------
     for _, row in df.iterrows():
         try:
             source_raw = str(row.get("SourceFolder", "N/A"))
             source_clean = source_raw.replace(".csv", "").replace("combined_metadata_", "")
-            
-            # ----------------------------------------
-            # GET SourceFile SAFELY
-            # ----------------------------------------
+
             raw_file = row.get("SourceFile", "")
-            file_name = str(raw_file) if pd.notna(raw_file) and str(raw_file).strip() != "" else "N/A"
+            file_name = (
+                str(raw_file)
+                if pd.notna(raw_file) and str(raw_file).strip() != ""
+                else "N/A"
+            )
 
             uploaded_stations.append({
                 "latitude":    float(row["Latitude_decimal"]),
@@ -350,8 +363,8 @@ def load_meta():
             print("Skipping row:", e)
 
     return {
-        "count": len(uploaded_stations),
-        "message": "Metadata loaded successfully",
+        "count":       len(uploaded_stations),
+        "message":     "Metadata loaded successfully",
         "meta_folder": meta_folder,
     }
 
@@ -364,10 +377,9 @@ def load_ctd_data():
     ]
     return pd.concat(
         [pd.read_csv(f) for f in files],
-        ignore_index=True
+        ignore_index=True,
     )
 
-# CTD_DATA_FILE = "/home/ishitha/Desktop/meta/ctd_data.csv"
 
 @app.get("/profile/{station_file:path}")
 def get_profile_data(station_file: str):
@@ -381,10 +393,10 @@ def get_profile_data(station_file: str):
         SELECT
             depSM,
 
-            t090C,
+            TEMP_QC_VAR,
             Temp_QC,
 
-            Sal00,
+            SAL_QC_VAR,
             Sal_QC,
 
             "c0S/m",
@@ -401,7 +413,6 @@ def get_profile_data(station_file: str):
         WHERE stem = ?
         ORDER BY depSM
     """
-    #print(rows[0].keys())
 
     with sqlite3.connect(CTD_CACHE_DB) as conn:
         conn.row_factory = sqlite3.Row
@@ -411,9 +422,6 @@ def get_profile_data(station_file: str):
         return {"error": f"No profile found for stem: {stem}"}
 
     return [
-        {
-            key: row[key]
-            for key in CTD_OUTPUT_COLUMNS
-        }
+        {key: row[key] for key in CTD_OUTPUT_COLUMNS}
         for row in rows
     ]

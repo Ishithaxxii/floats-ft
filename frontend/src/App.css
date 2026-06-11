@@ -325,6 +325,11 @@ html, body, #root {
     color: #e74c3c;
 }
 
+.profile-ts-section {
+    width: 100%;
+    margin-bottom: 24px;
+}
+
 .profile-charts-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
