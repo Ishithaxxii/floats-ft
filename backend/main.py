@@ -28,21 +28,18 @@ app.add_middleware(
 # ==========================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
-
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
 # ==========================================
 # PATHS
 # ==========================================
 
-CTD_DATA_FILE = os.environ.get(
-    "SEASNAP_CTD_DATA_FILE",
-    os.path.join(DATA_DIR, "Outside_EEZ_CTD_QC.csv")
+# Folder containing multiple CTD CSV files
+CTD_DATA_FOLDER = os.environ.get(
+    "SEASNAP_CTD_DATA_FOLDER",
+    "/home/incois/PAJO/pplWorks/Ishita/Final QC/CTD"
 )
-
-CTD_DATA_FOLDER = "/home/ishitha/Desktop/testmeta/"
 
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 
@@ -51,39 +48,34 @@ CTD_CACHE_DB = os.environ.get(
     os.path.join(CACHE_DIR, "ctd_profiles.sqlite")
 )
 
+META_FOLDER = os.environ.get(
+    "SEASNAP_META_FOLDER",
+    "/home/incois/PAJO/pplWorks/Ishita/Final QC/CTD/Metadata/Filtered Metadata"
+)
+
 print(BASE_DIR)
 print(PROJECT_ROOT)
 print(DATA_DIR)
-print(CTD_DATA_FILE)
-
+print(CTD_DATA_FOLDER)
 
 CURRENT_META_DF = None
-
 uploaded_stations = []
-
-META_FOLDER = os.environ.get(
-    "SEASNAP_META_FOLDER",
-    "/home/ishitha/Desktop/meta_csv"
-)
 
 # ==========================================
 # COLUMN MAPPINGS
 # ==========================================
-# Maps every possible source column name → internal canonical name.
-# TEMP_QC_VAR and SAL_QC_VAR are now the canonical names for
-# QC-flagged temperature and salinity.
 
 CTD_PROFILE_COLUMNS = {
     # Depth
     "Depth (m)":            "depSM",
     "depSM":                "depSM",
 
-    # Temperature  ← NOW maps to TEMP_QC_VAR
+    # Temperature -> TEMP_QC_VAR
     "Temp-90 (deg C)":      "TEMP_QC_VAR",
     "t090C":                "TEMP_QC_VAR",
     "TEMP_QC_VAR":          "TEMP_QC_VAR",
 
-    # Salinity  ← NOW maps to SAL_QC_VAR
+    # Salinity -> SAL_QC_VAR
     "Sal00 (psu)":          "SAL_QC_VAR",
     "Sal00":                "SAL_QC_VAR",
     "SAL_QC_VAR":           "SAL_QC_VAR",
@@ -113,46 +105,72 @@ CTD_PROFILE_COLUMNS = {
 
 CTD_OUTPUT_COLUMNS = [
     "depSM",
-
-    "TEMP_QC_VAR",   # ← was t090C
+    "TEMP_QC_VAR",
     "Temp_QC",
-
-    "SAL_QC_VAR",    # ← was Sal00
+    "SAL_QC_VAR",
     "Sal_QC",
-
     "c0S/m",
-
     "sigma-t00",
-
     "sbeox0ML/L",
-
     "Pres_QC",
-
     "ALL_TESTS_QC",
 ]
 
 
-def resolve_ctd_data_file():
+# ==========================================
+# CTD FOLDER RESOLUTION
+# ==========================================
+
+def resolve_ctd_data_folder():
+    """Return the CTD data folder path, checking fallbacks."""
     candidates = [
-        os.environ.get("SEASNAP_CTD_DATA_FILE"),
-        CTD_DATA_FILE,
-        os.path.join(DATA_DIR, "Outside_EEZ_CTD_QC.csv"),
-        os.path.join(BASE_DIR, "data", "ctd_data.csv"),
-        "/home/ishitha/Desktop/test_data/Outside_EEZ_CTD_QC.csv",
+        os.environ.get("SEASNAP_CTD_DATA_FOLDER"),
+        CTD_DATA_FOLDER,
+        os.path.join(DATA_DIR, "ctd"),
+        os.path.join(PROJECT_ROOT, "ctd"),
     ]
     for candidate in candidates:
-        if candidate and os.path.isfile(candidate):
-            return candidate
+        if candidate and os.path.isdir(candidate):
+            csv_files = [f for f in os.listdir(candidate) if f.endswith(".csv")]
+            if csv_files:
+                return candidate
     raise FileNotFoundError(
-        "CTD data CSV not found. Set SEASNAP_CTD_DATA_FILE to the full CSV path."
+        "CTD data folder not found or contains no CSV files. "
+        "Set SEASNAP_CTD_DATA_FOLDER to the folder path."
     )
 
 
-def cache_is_current(csv_path):
+def get_ctd_csv_files(folder):
+    """Return sorted list of all CSV file paths in the folder."""
+    return sorted(
+        os.path.join(folder, f)
+        for f in os.listdir(folder)
+        if f.endswith(".csv")
+    )
+
+
+def get_folder_fingerprint(folder):
+    """
+    Fingerprint the folder by the latest mtime across all CSVs.
+    Used to detect when any file in the folder has changed.
+    """
+    files = get_ctd_csv_files(folder)
+    if not files:
+        return folder, 0.0
+    latest_mtime = max(os.path.getmtime(f) for f in files)
+    return folder, latest_mtime
+
+
+# ==========================================
+# CACHE HELPERS
+# ==========================================
+
+def cache_is_current(folder):
     if not os.path.isfile(CTD_CACHE_DB):
         return False
 
-    csv_mtime = os.path.getmtime(csv_path)
+    _, latest_mtime = get_folder_fingerprint(folder)
+
     with sqlite3.connect(CTD_CACHE_DB) as conn:
         try:
             rows = dict(conn.execute("SELECT key, value FROM metadata").fetchall())
@@ -160,97 +178,108 @@ def cache_is_current(csv_path):
             return False
 
     return (
-        rows.get("source_path") == csv_path
-        and float(rows.get("source_mtime", 0)) == csv_mtime
+        rows.get("source_path") == folder
+        and float(rows.get("source_mtime", 0)) == latest_mtime
     )
 
 
 def ensure_ctd_cache():
-    csv_path = resolve_ctd_data_file()
+    folder = resolve_ctd_data_folder()
 
-    if cache_is_current(csv_path):
+    if cache_is_current(folder):
         print(f"Using CTD cache: {CTD_CACHE_DB}")
-        return csv_path
+        return folder
+
+    csv_files = get_ctd_csv_files(folder)
+    _, latest_mtime = get_folder_fingerprint(folder)
 
     os.makedirs(CACHE_DIR, exist_ok=True)
-    print(f"Building CTD cache from {csv_path}")
+    print(f"Building CTD cache from {len(csv_files)} file(s) in: {folder}")
 
     usecols = list(CTD_PROFILE_COLUMNS.keys())
+
     with sqlite3.connect(CTD_CACHE_DB) as conn:
         conn.execute("DROP TABLE IF EXISTS profiles")
         conn.execute("DROP TABLE IF EXISTS metadata")
         conn.execute("""
             CREATE TABLE profiles (
-                stem TEXT NOT NULL,
-
-                depSM REAL,
-
-                TEMP_QC_VAR REAL,
-                Temp_QC     INTEGER,
-
-                SAL_QC_VAR REAL,
-                Sal_QC     INTEGER,
-
+                stem         TEXT NOT NULL,
+                depSM        REAL,
+                TEMP_QC_VAR  REAL,
+                Temp_QC      INTEGER,
+                SAL_QC_VAR   REAL,
+                Sal_QC       INTEGER,
                 "c0S/m"      REAL,
-
                 "sigma-t00"  REAL,
-
                 "sbeox0ML/L" REAL,
-
                 Pres_QC      INTEGER,
-
                 ALL_TESTS_QC INTEGER
             )
         """)
         conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 
         total_rows = 0
-        for chunk in pd.read_csv(
-            csv_path,
-            usecols=lambda col: col.strip() in usecols,
-            chunksize=100_000,
-            low_memory=False,
-        ):
-            chunk.columns = chunk.columns.str.strip()
-            chunk = chunk.rename(columns=CTD_PROFILE_COLUMNS)
 
-            # Keep the last duplicate — preserves the actual TEMP_QC_VAR/SAL_QC_VAR columns
-            chunk = chunk.loc[:, ~chunk.columns.duplicated(keep="last")]
+        for csv_path in csv_files:
+            print(f"  Processing: {os.path.basename(csv_path)}")
+            file_rows = 0
 
-            if "SourceFile" not in chunk.columns:
-                raise ValueError("CTD CSV needs either SourceFile or folderpath_filename")
+            for chunk in pd.read_csv(
+                csv_path,
+                usecols=lambda col: col.strip() in usecols,
+                chunksize=100_000,
+                low_memory=False,
+            ):
+                chunk.columns = chunk.columns.str.strip()
+                chunk = chunk.rename(columns=CTD_PROFILE_COLUMNS)
 
-            chunk["stem"] = (
-                chunk["SourceFile"]
-                .astype(str)
-                .str.rsplit(".", n=1)
-                .str[0]
-                .str.strip()
-                .str.lower()
-            )
+                # Drop duplicate column names from rename collisions
+                # (e.g. both "Temp-90 (deg C)" and "TEMP_QC_VAR" present)
+                # keep="last" preserves the actual QC-corrected column
+                chunk = chunk.loc[:, ~chunk.columns.duplicated(keep="last")]
 
-            chunk = chunk.reindex(columns=["stem"] + CTD_OUTPUT_COLUMNS)
+                if "SourceFile" not in chunk.columns:
+                    raise ValueError(
+                        f"No SourceFile column found in {csv_path}. "
+                        "Expected 'SourceFile' or 'folderpath_filename'."
+                    )
 
-            for col in CTD_OUTPUT_COLUMNS:
-                chunk[col] = pd.to_numeric(chunk[col], errors="coerce")
-                
-            chunk = chunk.dropna(subset=["stem", "depSM"])
-            chunk.to_sql("profiles", conn, if_exists="append", index=False)
-            total_rows += len(chunk)
-            print(f"  Cached {total_rows:,} usable rows...", end="\r")
+                chunk["stem"] = (
+                    chunk["SourceFile"]
+                    .astype(str)
+                    .str.rsplit(".", n=1)
+                    .str[0]
+                    .str.strip()
+                    .str.lower()
+                )
+
+                # reindex fills missing output columns with NaN as proper Series
+                chunk = chunk.reindex(columns=["stem"] + CTD_OUTPUT_COLUMNS)
+
+                for col in CTD_OUTPUT_COLUMNS:
+                    chunk[col] = pd.to_numeric(chunk[col], errors="coerce")
+
+                chunk = chunk.dropna(subset=["stem", "depSM"])
+                chunk.to_sql("profiles", conn, if_exists="append", index=False)
+
+                file_rows += len(chunk)
+                total_rows += len(chunk)
+                print(f"    {total_rows:,} total rows cached...", end="\r")
+
+            print(f"  {os.path.basename(csv_path)}: {file_rows:,} rows")
 
         conn.execute("CREATE INDEX idx_profiles_stem ON profiles(stem)")
         conn.execute(
             "INSERT INTO metadata (key, value) VALUES (?, ?)",
-            ("source_path", csv_path),
+            ("source_path", folder),
         )
         conn.execute(
             "INSERT INTO metadata (key, value) VALUES (?, ?)",
-            ("source_mtime", str(os.path.getmtime(csv_path))),
+            ("source_mtime", str(latest_mtime)),
         )
 
-    print(f"\nCTD cache ready: {total_rows:,} usable rows")
-    return csv_path
+    print(f"\nCTD cache ready: {total_rows:,} usable rows from {len(csv_files)} file(s)")
+    return folder
 
 
 # ==========================================
@@ -369,18 +398,6 @@ def load_meta():
     }
 
 
-def load_ctd_data():
-    files = [
-        os.path.join(CTD_DATA_FOLDER, f)
-        for f in os.listdir(CTD_DATA_FOLDER)
-        if f.endswith(".csv")
-    ]
-    return pd.concat(
-        [pd.read_csv(f) for f in files],
-        ignore_index=True,
-    )
-
-
 @app.get("/profile/{station_file:path}")
 def get_profile_data(station_file: str):
     ensure_ctd_cache()
@@ -392,23 +409,15 @@ def get_profile_data(station_file: str):
     query = """
         SELECT
             depSM,
-
             TEMP_QC_VAR,
             Temp_QC,
-
             SAL_QC_VAR,
             Sal_QC,
-
             "c0S/m",
-
             "sigma-t00",
-
             "sbeox0ML/L",
-
             Pres_QC,
-
             ALL_TESTS_QC
-
         FROM profiles
         WHERE stem = ?
         ORDER BY depSM
