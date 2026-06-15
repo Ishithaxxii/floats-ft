@@ -648,3 +648,53 @@ html, body, #root {
     color: #555;
     cursor: not-allowed;
 }
+
+.ts-diagram-container {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 16px;
+    width: 100%;
+}
+
+.ts-diagram-plot {
+    flex: 1;
+    min-width: 0;
+}
+
+.qc-summary-panel {
+    flex: 0 0 240px;
+    background: #f8f9fa;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 60px;
+}
+
+.qc-summary-title {
+    margin: 0 0 12px 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #222;
+}
+
+.qc-summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.qc-summary-table td {
+    padding: 4px 0;
+    white-space: nowrap;
+}
+
+.qc-summary-label {
+    color: #333;
+    padding-right: 12px;
+}
+
+.qc-summary-value {
+    font-weight: 700;
+    text-align: right;
+}
