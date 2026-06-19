@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 import os
@@ -18,130 +18,143 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ==========================================
-# BASE DIRECTORY
+# DIRECTORIES
 # ==========================================
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
-
-# ==========================================
-# PATHS
-# ==========================================
-
-# Folder containing multiple CTD CSV files
-CTD_DATA_FOLDER = os.environ.get(
-    "SEASNAP_CTD_DATA_FOLDER",
-    "/home/incois/PAJO/pplWorks/Ishita/Final QC/CTD"
-)
-
-CACHE_DIR = os.path.join(BASE_DIR, "cache")
+DATA_DIR    = os.path.join(PROJECT_ROOT, "data")
+CACHE_DIR   = os.path.join(BASE_DIR, "cache")
 
 CTD_CACHE_DB = os.environ.get(
     "SEASNAP_CTD_CACHE_DB",
-    os.path.join(CACHE_DIR, "ctd_profiles.sqlite")
+    os.path.join(CACHE_DIR, "ctd_profiles.sqlite"),
 )
 
-META_FOLDER = os.environ.get(
-    "SEASNAP_META_FOLDER",
-    "/home/incois/PAJO/pplWorks/Ishita/Final QC/CTD/Metadata/Filtered Metadata"
-)
-
-print(BASE_DIR)
-print(PROJECT_ROOT)
-print(DATA_DIR)
-print(CTD_DATA_FOLDER)
-
-CURRENT_META_DF = None
-uploaded_stations = []
-
 # ==========================================
-# COLUMN MAPPINGS
+# INSTRUMENT CONFIG
 # ==========================================
+# column_map  : raw CSV column -> canonical name
+# output_columns : canonical columns stored in SQLite and returned by /profile
 
-CTD_PROFILE_COLUMNS = {
-    # Depth
-    "Depth (m)":            "depSM",
-    "depSM":                "depSM",
+INSTRUMENT_CONFIG: dict[str, dict] = {
+    "ctd": {
+        "data_folder": os.environ.get(
+            "SEASNAP_CTD_DATA_FOLDER",
+            "/home/incois/PAJO/pplWorks/Ishita/Final QC/CTD",
+        ),
+        "meta_folder": os.environ.get(
+            "SEASNAP_CTD_META_FOLDER",
+            "/home/incois/PAJO/pplWorks/Ishita/Final QC/CTD/Metadata/Filtered Metadata",
+        ),
+        "table": "profiles_ctd",
+        "column_map": {
+            "Depth (m)":           "depSM",
+            "depSM":               "depSM",
+            "Temp-90 (deg C)":     "TEMP_QC_VAR",
+            "t090C":               "TEMP_QC_VAR",
+            "TEMP_QC_VAR":         "TEMP_QC_VAR",
+            "Sal00 (psu)":         "SAL_QC_VAR",
+            "Sal00":               "SAL_QC_VAR",
+            "SAL_QC_VAR":          "SAL_QC_VAR",
+            "Conductivity (S/m)":  "c0S/m",
+            "c0S/m":               "c0S/m",
+            "Sigma-t":             "sigma-t00",
+            "sigma-t00":           "sigma-t00",
+            "DO (ml/l)":           "sbeox0ML/L",
+            "sbeox0ML/L":          "sbeox0ML/L",
+            "SourceFile":          "SourceFile",
+            "folderpath_filename": "SourceFile",
+            "Temp_QC":             "Temp_QC",
+            "Sal_QC":              "Sal_QC",
+            "Pres_QC":             "Pres_QC",
+            "ALL_TESTS_QC":        "ALL_TESTS_QC",
+        },
+        "output_columns": [
+            "depSM", "TEMP_QC_VAR", "Temp_QC",
+            "SAL_QC_VAR", "Sal_QC", "c0S/m",
+            "sigma-t00", "sbeox0ML/L", "Pres_QC", "ALL_TESTS_QC",
+        ],
+    },
 
-    # Temperature -> TEMP_QC_VAR
-    "Temp-90 (deg C)":      "TEMP_QC_VAR",
-    "t090C":                "TEMP_QC_VAR",
-    "TEMP_QC_VAR":          "TEMP_QC_VAR",
+    "xbt": {
+        "data_folder": os.environ.get(
+            "SEASNAP_XBT_DATA_FOLDER",
+            "/home/incois/PAJO/pplWorks/Ishita/Final QC/XBT",
+        ),
+        "meta_folder": os.environ.get(
+            "SEASNAP_XBT_META_FOLDER",
+            "/home/incois/PAJO/pplWorks/Ishita/Final QC/XBT/metadata",
+        ),
+        "table": "profiles_xbt",
+        "column_map": {
+            "Depth (m)":           "depSM",
+            "Temperature (deg C)": "TEMP_QC_VAR",
+            "TEMP_QC_VAR":         "TEMP_QC_VAR",
+            "Temp_QC":             "Temp_QC",
+            "Pres_QC":             "Pres_QC",
+            "SourceFile":          "SourceFile",
+            "ALL_TESTS_QC":        "ALL_TESTS_QC",
+        },
+        "output_columns": [
+            "depSM", "TEMP_QC_VAR", "Temp_QC", "Pres_QC", "ALL_TESTS_QC",
+        ],
+    },
 
-    # Salinity -> SAL_QC_VAR
-    "Sal00 (psu)":          "SAL_QC_VAR",
-    "Sal00":                "SAL_QC_VAR",
-    "SAL_QC_VAR":           "SAL_QC_VAR",
-
-    # Conductivity
-    "Conductivity (S/m)":   "c0S/m",
-    "c0S/m":                "c0S/m",
-
-    # Density
-    "Sigma-t":              "sigma-t00",
-    "sigma-t00":            "sigma-t00",
-
-    # Dissolved oxygen
-    "DO (ml/l)":            "sbeox0ML/L",
-    "sbeox0ML/L":           "sbeox0ML/L",
-
-    # Source tracking
-    "SourceFile":           "SourceFile",
-    "folderpath_filename":  "SourceFile",
-
-    # QC flags
-    "Temp_QC":              "Temp_QC",
-    "Sal_QC":               "Sal_QC",
-    "Pres_QC":              "Pres_QC",
-    "ALL_TESTS_QC":         "ALL_TESTS_QC",
+    "xctd": {
+        "data_folder": os.environ.get(
+            "SEASNAP_XCTD_DATA_FOLDER",
+            "/home/incois/PAJO/pplWorks/Ishita/Final QC/XCTD",
+        ),
+        "meta_folder": os.environ.get(
+            "SEASNAP_XCTD_META_FOLDER",
+            "/home/incois/PAJO/pplWorks/Ishita/Final QC/XCTD/metadata",
+        ),
+        "table": "profiles_xctd",
+        "column_map": {
+            "Depth (m)":           "depSM",
+            "Temperature (deg C)": "TEMP_QC_VAR",
+            "TEMP_QC_VAR":         "TEMP_QC_VAR",
+            "Salinity (psu)":      "SAL_QC_VAR",
+            "SAL_QC_VAR":          "SAL_QC_VAR",
+            "Temp_QC":             "Temp_QC",
+            "Sal_QC":              "Sal_QC",
+            "Pres_QC":             "Pres_QC",
+            "SourceFile":          "SourceFile",
+            "ALL_TESTS_QC":        "ALL_TESTS_QC",
+        },
+        "output_columns": [
+            "depSM", "TEMP_QC_VAR", "Temp_QC",
+            "SAL_QC_VAR", "Sal_QC", "Pres_QC", "ALL_TESTS_QC",
+        ],
+    },
 }
 
-CTD_OUTPUT_COLUMNS = [
-    "depSM",
-    "TEMP_QC_VAR",
-    "Temp_QC",
-    "SAL_QC_VAR",
-    "Sal_QC",
-    "c0S/m",
-    "sigma-t00",
-    "sbeox0ML/L",
-    "Pres_QC",
-    "ALL_TESTS_QC",
+# Full union of columns — /profile always returns this shape;
+# columns not produced by a given instrument are filled with None.
+ALL_OUTPUT_COLUMNS = [
+    "depSM", "TEMP_QC_VAR", "Temp_QC",
+    "SAL_QC_VAR", "Sal_QC", "c0S/m",
+    "sigma-t00", "sbeox0ML/L", "Pres_QC", "ALL_TESTS_QC",
 ]
 
+QC_COLUMNS = {"Temp_QC", "Sal_QC", "Pres_QC", "ALL_TESTS_QC"}
+
+# In-memory station cache: instrument_type -> list[dict]
+_station_cache: dict[str, list[dict]] = {}
+
 
 # ==========================================
-# CTD FOLDER RESOLUTION
+# FOLDER HELPERS
 # ==========================================
 
-def resolve_ctd_data_folder():
-    """Return the CTD data folder path, checking fallbacks."""
-    candidates = [
-        os.environ.get("SEASNAP_CTD_DATA_FOLDER"),
-        CTD_DATA_FOLDER,
-        os.path.join(DATA_DIR, "ctd"),
-        os.path.join(PROJECT_ROOT, "ctd"),
-    ]
-    for candidate in candidates:
-        if candidate and os.path.isdir(candidate):
-            csv_files = [f for f in os.listdir(candidate) if f.endswith(".csv")]
-            if csv_files:
-                return candidate
-    raise FileNotFoundError(
-        "CTD data folder not found or contains no CSV files. "
-        "Set SEASNAP_CTD_DATA_FOLDER to the folder path."
-    )
-
-
-def get_ctd_csv_files(folder):
-    """Return sorted list of all CSV file paths in the folder."""
+def _csv_files(folder: str) -> list[str]:
+    """Sorted list of .csv paths in folder."""
     return sorted(
         os.path.join(folder, f)
         for f in os.listdir(folder)
@@ -149,212 +162,210 @@ def get_ctd_csv_files(folder):
     )
 
 
-def get_folder_fingerprint(folder):
-    """
-    Fingerprint the folder by the latest mtime across all CSVs.
-    Used to detect when any file in the folder has changed.
-    """
-    files = get_ctd_csv_files(folder)
-    if not files:
-        return folder, 0.0
-    latest_mtime = max(os.path.getmtime(f) for f in files)
-    return folder, latest_mtime
-
-
-# ==========================================
-# CACHE HELPERS
-# ==========================================
-
-def cache_is_current(folder):
-    if not os.path.isfile(CTD_CACHE_DB):
-        return False
-
-    _, latest_mtime = get_folder_fingerprint(folder)
-
-    with sqlite3.connect(CTD_CACHE_DB) as conn:
-        try:
-            rows = dict(conn.execute("SELECT key, value FROM metadata").fetchall())
-        except sqlite3.OperationalError:
-            return False
-
-    return (
-        rows.get("source_path") == folder
-        and float(rows.get("source_mtime", 0)) == latest_mtime
+def _resolve_folder(instrument_type: str) -> str:
+    """Return a valid data folder for the instrument, or raise."""
+    cfg = INSTRUMENT_CONFIG[instrument_type]
+    candidates = [
+        cfg["data_folder"],
+        os.path.join(DATA_DIR, instrument_type),
+        os.path.join(PROJECT_ROOT, instrument_type),
+    ]
+    for path in candidates:
+        if path and os.path.isdir(path) and _csv_files(path):
+            return path
+    raise FileNotFoundError(
+        f"{instrument_type.upper()} data folder not found or has no CSVs. "
+        f"Set SEASNAP_{instrument_type.upper()}_DATA_FOLDER."
     )
 
 
-def ensure_ctd_cache():
-    folder = resolve_ctd_data_folder()
+def _folder_mtime(folder: str) -> float:
+    """Latest mtime across all CSVs in folder."""
+    files = _csv_files(folder)
+    return max((os.path.getmtime(f) for f in files), default=0.0)
 
-    if cache_is_current(folder):
-        print(f"Using CTD cache: {CTD_CACHE_DB}")
-        return folder
 
-    csv_files = get_ctd_csv_files(folder)
-    _, latest_mtime = get_folder_fingerprint(folder)
+# ==========================================
+# SQLITE CACHE HELPERS
+# ==========================================
+
+def _meta_key(instrument_type: str, key: str) -> str:
+    return f"{instrument_type}:{key}"
+
+
+def _cache_is_current(instrument_type: str, folder: str) -> bool:
+    if not os.path.isfile(CTD_CACHE_DB):
+        return False
+    latest = _folder_mtime(folder)
+    try:
+        with sqlite3.connect(CTD_CACHE_DB) as conn:
+            rows = dict(conn.execute("SELECT key, value FROM metadata").fetchall())
+    except sqlite3.OperationalError:
+        return False
+    return (
+        rows.get(_meta_key(instrument_type, "source_path")) == folder
+        and float(rows.get(_meta_key(instrument_type, "source_mtime"), 0)) == latest
+    )
+
+
+def _build_cache(instrument_type: str, folder: str) -> None:
+    """(Re)build the SQLite table for one instrument type."""
+    cfg = INSTRUMENT_CONFIG[instrument_type]
+    table        = cfg["table"]
+    column_map   = cfg["column_map"]
+    out_cols     = cfg["output_columns"]
+    usecols_set  = set(column_map.keys())
+    csv_files    = _csv_files(folder)
+    latest_mtime = _folder_mtime(folder)
 
     os.makedirs(CACHE_DIR, exist_ok=True)
-    print(f"Building CTD cache from {len(csv_files)} file(s) in: {folder}")
+    print(f"[{instrument_type}] Building cache from {len(csv_files)} file(s) in: {folder}")
 
-    usecols = list(CTD_PROFILE_COLUMNS.keys())
+    col_defs = ", ".join(
+        f'"{c}" {"INTEGER" if c in QC_COLUMNS else "REAL"}'
+        for c in out_cols
+    )
 
-    with sqlite3.connect(CTD_CACHE_DB) as conn:
-        conn.execute("DROP TABLE IF EXISTS profiles")
-        conn.execute("DROP TABLE IF EXISTS metadata")
-        conn.execute("""
-            CREATE TABLE profiles (
-                stem         TEXT NOT NULL,
-                depSM        REAL,
-                TEMP_QC_VAR  REAL,
-                Temp_QC      INTEGER,
-                SAL_QC_VAR   REAL,
-                Sal_QC       INTEGER,
-                "c0S/m"      REAL,
-                "sigma-t00"  REAL,
-                "sbeox0ML/L" REAL,
-                Pres_QC      INTEGER,
-                ALL_TESTS_QC INTEGER
-            )
-        """)
-        conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    with sqlite3.connect(CTD_CACHE_DB, isolation_level=None) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS metadata "
+            "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+        conn.execute(f"CREATE TABLE {table} (stem TEXT NOT NULL, {col_defs})")
 
-        total_rows = 0
+        total = 0
+        conn.execute("BEGIN")
 
         for csv_path in csv_files:
-            print(f"  Processing: {os.path.basename(csv_path)}")
+            fname = os.path.basename(csv_path)
             file_rows = 0
 
             for chunk in pd.read_csv(
                 csv_path,
-                usecols=lambda col: col.strip() in usecols,
+                usecols=lambda c: c.strip() in usecols_set,
                 chunksize=100_000,
                 low_memory=False,
             ):
                 chunk.columns = chunk.columns.str.strip()
-                chunk = chunk.rename(columns=CTD_PROFILE_COLUMNS)
-
-                # Drop duplicate column names from rename collisions
-                # (e.g. both "Temp-90 (deg C)" and "TEMP_QC_VAR" present)
-                # keep="last" preserves the actual QC-corrected column
+                chunk = chunk.rename(columns=column_map)
+                # Drop collisions from rename (keep last = QC-corrected value)
                 chunk = chunk.loc[:, ~chunk.columns.duplicated(keep="last")]
 
                 if "SourceFile" not in chunk.columns:
-                    raise ValueError(
-                        f"No SourceFile column found in {csv_path}. "
-                        "Expected 'SourceFile' or 'folderpath_filename'."
-                    )
+                    raise ValueError(f"No SourceFile column in {csv_path}.")
 
                 chunk["stem"] = (
-                    chunk["SourceFile"]
-                    .astype(str)
-                    .str.rsplit(".", n=1)
-                    .str[0]
-                    .str.strip()
-                    .str.lower()
+                    chunk["SourceFile"].astype(str)
+                    .str.rsplit(".", n=1).str[0]
+                    .str.strip().str.lower()
                 )
 
-                # reindex fills missing output columns with NaN as proper Series
-                chunk = chunk.reindex(columns=["stem"] + CTD_OUTPUT_COLUMNS)
-
-                for col in CTD_OUTPUT_COLUMNS:
+                chunk = chunk.reindex(columns=["stem"] + out_cols)
+                for col in out_cols:
                     chunk[col] = pd.to_numeric(chunk[col], errors="coerce")
-
                 chunk = chunk.dropna(subset=["stem", "depSM"])
-                chunk.to_sql("profiles", conn, if_exists="append", index=False)
 
+                chunk.to_sql(table, conn, if_exists="append", index=False)
                 file_rows += len(chunk)
-                total_rows += len(chunk)
-                print(f"    {total_rows:,} total rows cached...", end="\r")
+                total     += len(chunk)
 
-            print(f"  {os.path.basename(csv_path)}: {file_rows:,} rows")
+            print(f"  {fname}: {file_rows:,} rows  (total {total:,})")
 
-        conn.execute("CREATE INDEX idx_profiles_stem ON profiles(stem)")
+        conn.execute("COMMIT")
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_stem ON {table}(stem)")
         conn.execute(
-            "INSERT INTO metadata (key, value) VALUES (?, ?)",
-            ("source_path", folder),
+            "INSERT OR REPLACE INTO metadata VALUES (?, ?)",
+            (_meta_key(instrument_type, "source_path"), folder),
         )
         conn.execute(
-            "INSERT INTO metadata (key, value) VALUES (?, ?)",
-            ("source_mtime", str(latest_mtime)),
+            "INSERT OR REPLACE INTO metadata VALUES (?, ?)",
+            (_meta_key(instrument_type, "source_mtime"), str(latest_mtime)),
         )
 
-    print(f"\nCTD cache ready: {total_rows:,} usable rows from {len(csv_files)} file(s)")
+    print(f"[{instrument_type}] Cache ready: {total:,} rows.")
+
+
+def ensure_cache(instrument_type: str) -> str:
+    """Return data folder, building/validating cache as needed."""
+    folder = _resolve_folder(instrument_type)
+    if not _cache_is_current(instrument_type, folder):
+        _build_cache(instrument_type, folder)
+    else:
+        print(f"[{instrument_type}] Cache is current.")
     return folder
 
 
 # ==========================================
-# API ENDPOINTS
+# METADATA LOADING
 # ==========================================
 
-@app.get("/stations")
-def get_stations():
-    global uploaded_stations
-    if not uploaded_stations:
-        load_meta()
-    return {"stations": uploaded_stations}
+_META_RENAME = {
+    "Latitude(decimal)":   "Latitude_decimal",
+    "Latitude (decimal)":  "Latitude_decimal",
+    "Longitude(decimal)":  "Longitude_decimal",
+    "Longitude (decimal)": "Longitude_decimal",
+    "Depth":               "Station Depth",
+    "Station":             "Station Number",
+}
+
+_COALESCE_COLS = ["Latitude_decimal", "Longitude_decimal", "Station Depth", "Station Number"]
 
 
-@app.post("/load-meta")
-def load_meta():
-    global uploaded_stations
-    uploaded_stations = []
+def _resolve_meta_folder(instrument_type: str) -> str:
+    cfg = INSTRUMENT_CONFIG[instrument_type]
+    candidates = [
+        cfg["meta_folder"],
+        os.path.join(PROJECT_ROOT, "meta", instrument_type),
+        os.path.join(BASE_DIR,     "meta", instrument_type),
+    ]
+    for path in candidates:
+        if path and os.path.isdir(path):
+            return path
+    return cfg["meta_folder"]  # let caller handle missing
 
-    meta_folder = next(
-        (
-            folder
-            for folder in [
-                META_FOLDER,
-                os.path.join(PROJECT_ROOT, "meta"),
-                os.path.join(BASE_DIR, "meta"),
-            ]
-            if os.path.isdir(folder)
-        ),
-        META_FOLDER,
-    )
+
+def _load_meta_df(instrument_type: str) -> tuple[pd.DataFrame, str, str | None]:
+    """Load, clean and return the metadata DataFrame for one instrument."""
+    meta_folder = _resolve_meta_folder(instrument_type)
+
+    if not os.path.isdir(meta_folder):
+        return pd.DataFrame(), meta_folder, "Meta folder not found"
 
     csv_files = [
         os.path.join(meta_folder, f)
         for f in os.listdir(meta_folder)
         if f.endswith(".csv")
     ]
-
     if not csv_files:
-        return {"error": "No CSV files found"}
+        return pd.DataFrame(), meta_folder, "No CSV files found"
 
-    all_dfs = []
-    for file in csv_files:
+    frames = []
+    for path in csv_files:
         try:
-            df = pd.read_csv(file)
-            all_dfs.append(df)
+            frames.append(pd.read_csv(path))
         except Exception as e:
-            print("Failed:", file, e)
+            print(f"[{instrument_type}] Failed to read {path}: {e}")
 
-    if not all_dfs:
-        return {"error": "No valid CSV files"}
+    if not frames:
+        return pd.DataFrame(), meta_folder, "No valid CSV files"
 
-    df = pd.concat(all_dfs, ignore_index=True)
+    df = pd.concat(frames, ignore_index=True).rename(columns=_META_RENAME)
 
-    df = df.rename(columns={
-        "Latitude(decimal)":  "Latitude_decimal",
-        "Longitude(decimal)": "Longitude_decimal",
-        "Depth":              "Station Depth",
-        "Station":            "Station Number",
-    })
+    # Coalesce duplicate columns (e.g. two "Latitude_decimal" after rename)
+    for col in _COALESCE_COLS:
+        dupes = df.loc[:, df.columns == col]
+        if dupes.shape[1] > 1:
+            merged = dupes.bfill(axis=1).iloc[:, 0]
+            df = df.loc[:, ~df.columns.duplicated()]
+            df[col] = merged
 
-    # Coalesce duplicate columns (keep first non-null value)
-    coalesced_columns = {}
-    for col in ["Latitude_decimal", "Longitude_decimal", "Station Depth", "Station Number"]:
-        duplicate_cols = df.loc[:, df.columns == col]
-        if duplicate_cols.shape[1] > 1:
-            coalesced_columns[col] = duplicate_cols.bfill(axis=1).iloc[:, 0]
+    if "Latitude_decimal" not in df.columns or "Longitude_decimal" not in df.columns:
+        return pd.DataFrame(), meta_folder, "Lat/Lon columns missing"
 
-    if coalesced_columns:
-        df = df.loc[:, ~df.columns.duplicated()]
-        for col, values in coalesced_columns.items():
-            df[col] = values
-
-    # Clean and validate coordinates
-    df["Latitude_decimal"] = pd.to_numeric(df["Latitude_decimal"], errors="coerce")
+    df["Latitude_decimal"]  = pd.to_numeric(df["Latitude_decimal"],  errors="coerce")
     df["Longitude_decimal"] = pd.to_numeric(df["Longitude_decimal"], errors="coerce")
     df = df.dropna(subset=["Latitude_decimal", "Longitude_decimal"])
     df = df[
@@ -362,77 +373,119 @@ def load_meta():
         df["Longitude_decimal"].between(-180, 180)
     ]
 
-    print(f"Valid stations after cleaning: {len(df)}")
+    print(f"[{instrument_type}] Valid stations: {len(df)}")
+    return df, meta_folder, None
 
-    for _, row in df.iterrows():
+
+def _df_to_stations(df: pd.DataFrame, instrument_type: str) -> list[dict]:
+    stations = []
+    for row in df.itertuples(index=False):
         try:
-            source_raw = str(row.get("SourceFolder", "N/A"))
-            source_clean = source_raw.replace(".csv", "").replace("combined_metadata_", "")
-
-            raw_file = row.get("SourceFile", "")
+            raw_file  = getattr(row, "SourceFile", "")
             file_name = (
                 str(raw_file)
-                if pd.notna(raw_file) and str(raw_file).strip() != ""
+                if pd.notna(raw_file) and str(raw_file).strip()
                 else "N/A"
             )
+            source_raw   = str(getattr(row, "SourceFolder", "N/A"))
+            source_clean = source_raw.replace(".csv", "").replace("combined_metadata_", "")
 
-            uploaded_stations.append({
-                "latitude":    float(row["Latitude_decimal"]),
-                "longitude":   float(row["Longitude_decimal"]),
-                "ship":        infer_ship_from_metadata(row),
-                "cruise":      str(row.get("Cruise", "N/A")),
-                "station":     str(row.get("Station Number", "N/A")),
-                "datetime":    str(row.get("Datetime", "N/A")),
-                "depth":       str(row.get("Station Depth", "N/A")),
+            stations.append({
+                "type":        instrument_type,
+                "latitude":    float(row.Latitude_decimal),
+                "longitude":   float(row.Longitude_decimal),
+                "ship":        infer_ship_from_metadata(row._asdict()),
+                "cruise":      str(getattr(row, "Cruise",          "N/A")),
+                "station":     str(getattr(row, "Station Number",  "N/A")),
+                "datetime":    str(getattr(row, "Datetime",        "N/A")),
+                "depth":       str(getattr(row, "Station Depth",   "N/A")),
                 "source":      source_clean,
                 "file_name":   file_name,
                 "folder_path": file_name,
             })
         except Exception as e:
-            print("Skipping row:", e)
+            print(f"[{instrument_type}] Skipping row: {e}")
+    return stations
+
+
+# ==========================================
+# API ENDPOINTS
+# ==========================================
+
+def _validate_type(instrument_type: str) -> None:
+    if instrument_type not in INSTRUMENT_CONFIG:
+        raise HTTPException(status_code=400, detail=f"Unknown instrument type: '{instrument_type}'")
+
+
+@app.post("/load-meta")
+def load_meta(type: str = Query("ctd")):
+    instrument_type = type.lower()
+    _validate_type(instrument_type)
+
+    df, meta_folder, error = _load_meta_df(instrument_type)
+    if error:
+        _station_cache[instrument_type] = []
+        raise HTTPException(status_code=500, detail=error)
+
+    stations = _df_to_stations(df, instrument_type)
+    _station_cache[instrument_type] = stations
 
     return {
-        "count":       len(uploaded_stations),
+        "type":        instrument_type,
+        "count":       len(stations),
         "message":     "Metadata loaded successfully",
         "meta_folder": meta_folder,
     }
 
 
-@app.get("/profile/{station_file:path}")
-def get_profile_data(station_file: str):
-    ensure_ctd_cache()
+@app.get("/stations")
+def get_stations(type: str = Query("ctd")):
+    instrument_type = type.lower()
+    _validate_type(instrument_type)
 
+    # Auto-load if not yet in cache
+    if instrument_type not in _station_cache:
+        load_meta(type=instrument_type)
+
+    return {"stations": _station_cache.get(instrument_type, [])}
+
+
+@app.get("/profile/{station_file:path}")
+def get_profile(station_file: str, type: str = Query(None)):
     station_file = station_file.strip()
     stem = re.sub(r"_metadata\.csv$", "", station_file, flags=re.IGNORECASE)
     stem = stem.rsplit(".", 1)[0].strip().lower()
 
-    query = """
-        SELECT
-            depSM,
-            TEMP_QC_VAR,
-            Temp_QC,
-            SAL_QC_VAR,
-            Sal_QC,
-            "c0S/m",
-            "sigma-t00",
-            "sbeox0ML/L",
-            Pres_QC,
-            ALL_TESTS_QC
-        FROM profiles
-        WHERE stem = ?
-        ORDER BY depSM
-    """
+    search_types = (
+        [type.lower()] if type and type.lower() in INSTRUMENT_CONFIG
+        else list(INSTRUMENT_CONFIG.keys())
+    )
 
-    with sqlite3.connect(CTD_CACHE_DB) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(query, (stem,)).fetchall()
+    for instrument_type in search_types:
+        cfg      = INSTRUMENT_CONFIG[instrument_type]
+        table    = cfg["table"]
+        out_cols = cfg["output_columns"]
 
-    if not rows:
-        return {"error": f"No profile found for stem: {stem}"}
+        ensure_cache(instrument_type)
 
-    return [
-        {key: row[key] for key in CTD_OUTPUT_COLUMNS}
-        for row in rows
-    ]
+        col_list = ", ".join(f'"{c}"' for c in out_cols)
+        query    = f'SELECT {col_list} FROM {table} WHERE stem = ? ORDER BY depSM'
 
-    
+        try:
+            with sqlite3.connect(CTD_CACHE_DB) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(query, (stem,)).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+
+        if rows:
+            out_col_set = set(out_cols)
+            return [
+                {
+                    **{col: (row[col] if col in out_col_set else None) for col in ALL_OUTPUT_COLUMNS},
+                    "instrument_type": instrument_type,
+                }
+                for row in rows
+            ]
+
+    raise HTTPException(status_code=404, detail=f"No profile found for: {stem}")
