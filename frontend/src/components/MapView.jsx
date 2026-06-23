@@ -2,10 +2,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
     MapContainer,
     TileLayer,
-    CircleMarker,
+    Marker,
     Popup,
     Rectangle,
-    //GeoJSON,
     Polyline,
     useMapEvents,
 } from "react-leaflet";
@@ -31,13 +30,6 @@ const MARKER_COLORS = [
     "#795548", "#ffc107", "#673ab7", "#009688",
 ];
 
-// const EEZ_STYLE = {
-//     color: "#ffff00",
-//     weight: 2,
-//     opacity: 0.7,
-//     dashArray: "6 4",
-// };
-
 const EEZ_STYLE = {
     color: "#ffff00",
     weight: 2,
@@ -56,6 +48,39 @@ const BOX_STYLE = {
 };
 
 // ==========================================
+// INSTRUMENT SHAPE SVG ICONS
+// circle = CTD, triangle = XBT, diamond = XCTD
+// ==========================================
+function makeInstrumentIcon(instrumentType, color) {
+    const size = 14;
+    let shapeSvg;
+
+    if (instrumentType === "ctd") {
+        // Filled circle
+        shapeSvg = `<circle cx="7" cy="7" r="5.5" fill="${color}" stroke="rgba(0,0,0,0.45)" stroke-width="1"/>`;
+    } else if (instrumentType === "xbt") {
+        // Upward triangle
+        shapeSvg = `<polygon points="7,1.5 13,12.5 1,12.5" fill="${color}" stroke="rgba(0,0,0,0.45)" stroke-width="1"/>`;
+    } else {
+        // Diamond (XCTD)
+        shapeSvg = `<polygon points="7,1 13,7 7,13 1,7" fill="${color}" stroke="rgba(0,0,0,0.45)" stroke-width="1"/>`;
+    }
+
+    const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 14 14">
+            ${shapeSvg}
+        </svg>`;
+
+    return L.divIcon({
+        html: svg,
+        className: "",          // suppress Leaflet's default white box
+        iconSize:   [size, size],
+        iconAnchor: [size / 2, size / 2],
+        popupAnchor:[0, -size / 2],
+    });
+}
+
+// ==========================================
 // HELPERS
 // ==========================================
 function generateShipColorMap(stations) {
@@ -65,52 +90,32 @@ function generateShipColorMap(stations) {
     );
 }
 
-/**
- * Splits flat Point features into separate closed loops so no
- * diagonal artifact line is drawn between disconnected EEZ regions.
- */
 function extractEEZLoops(geojson) {
     const points = geojson.features
         .filter(f => f.geometry?.type === "Point")
-        .map(f => [
-            f.geometry.coordinates[1], // lat
-            f.geometry.coordinates[0], // lon
-        ]);
+        .map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
 
     if (points.length === 0) return [];
 
     const loops = [];
     let currentLoop = [points[0]];
-
-    // Tune this if needed
     const BREAK_THRESHOLD = 3.0;
 
     for (let i = 1; i < points.length; i++) {
         const prev = points[i - 1];
         const curr = points[i];
-
         const distance = Math.sqrt(
             Math.pow(curr[0] - prev[0], 2) +
             Math.pow(curr[1] - prev[1], 2)
         );
-
-        // Large jump => start a new segment
         if (distance > BREAK_THRESHOLD) {
-            if (currentLoop.length > 1) {
-                loops.push(currentLoop);
-            }
+            if (currentLoop.length > 1) loops.push(currentLoop);
             currentLoop = [curr];
         } else {
             currentLoop.push(curr);
         }
     }
-
-    if (currentLoop.length > 1) {
-        loops.push(currentLoop);
-    }
-
-    console.log("EEZ segments:", loops.length);
-
+    if (currentLoop.length > 1) loops.push(currentLoop);
     return loops;
 }
 
@@ -129,7 +134,6 @@ function BoxSelectHandler({ onBoundsChange }) {
             dragStart.current  = e.latlng;
             onBoundsChange(null, "drawing");
         },
-
         mousemove(e) {
             if (!isDragging.current || !dragStart.current) return;
             const start = dragStart.current;
@@ -141,32 +145,51 @@ function BoxSelectHandler({ onBoundsChange }) {
                 lonMax: Math.max(start.lng, end.lng),
             }, "drawing");
         },
-
         mouseup(e) {
             if (!isDragging.current || !dragStart.current) return;
             e.target.dragging.enable();
             isDragging.current = false;
-
             const start = dragStart.current;
             const end   = e.latlng;
             dragStart.current = null;
-
             const latMin = Math.min(start.lat, end.lat);
             const latMax = Math.max(start.lat, end.lat);
             const lonMin = Math.min(start.lng, end.lng);
             const lonMax = Math.max(start.lng, end.lng);
-
-            // Ignore tiny accidental clicks
             if (Math.abs(latMax - latMin) < 0.01 && Math.abs(lonMax - lonMin) < 0.01) {
                 onBoundsChange(null, "done");
                 return;
             }
-
             onBoundsChange({ latMin, latMax, lonMin, lonMax }, "done");
         },
     });
-
     return null;
+}
+
+// ==========================================
+// SHIFT+DRAG HINT OVERLAY
+// ==========================================
+function ShiftDragHint({ spatialBounds }) {
+    if (spatialBounds) return null;       // hide once a box is drawn
+    return (
+        <div style={{
+            position:     "absolute",
+            bottom:       "24px",
+            left:         "50%",
+            transform:    "translateX(-50%)",
+            zIndex:       1000,
+            background:   "rgba(0,0,0,0.55)",
+            color:        "#fff",
+            fontSize:     "12px",
+            padding:      "5px 10px",
+            borderRadius: "4px",
+            pointerEvents:"none",
+            whiteSpace:   "nowrap",
+            userSelect:   "none",
+        }}>
+            ⇧ Shift + drag to select a region
+        </div>
+    );
 }
 
 // ==========================================
@@ -183,8 +206,10 @@ export default function MapView({
 }) {
     const [activeShip, setActiveShip] = useState("all");
     const [eezLoops,   setEezLoops]   = useState([]);
-    //const [eezData, setEezData] = useState(null);
     const [previewBox, setPreviewBox] = useState(null);
+
+    // Track the full selected station so ProfilePlots gets type too
+    const [profileStation, setProfileStation] = useState(null);
 
     useEffect(() => {
         fetch("/data/india_eez.geojson")
@@ -192,14 +217,6 @@ export default function MapView({
             .then(data => setEezLoops(extractEEZLoops(data)))
             .catch(err => console.error("Failed to load EEZ GeoJSON:", err));
     }, []);
-    // useEffect(() => {
-    // fetch("/data/india_eez_polygon.geojson")
-    //     .then(res => res.json())
-    //     .then(setEezData)
-    //     .catch(err =>
-    //         console.error("Failed to load EEZ polygon:", err)
-    //     );
-    // }, []);
 
     const shipColorMap = generateShipColorMap(stations);
     const ships        = Object.keys(shipColorMap);
@@ -217,6 +234,12 @@ export default function MapView({
         }
     }, [onSpatialBoundsChange]);
 
+    // Open profile — store full station object, not just file_name
+    const handleOpenProfile = useCallback((station) => {
+        setProfileStation(station);
+        onOpenProfile(station.file_name);   // keeps parent profileFile in sync
+    }, [onOpenProfile]);
+
     const toPositions = (b) =>
         b ? [[b.latMin, b.lonMin], [b.latMax, b.lonMax]] : null;
 
@@ -232,23 +255,15 @@ export default function MapView({
                     url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                 />
 
-                {/* Shift+drag box select */}
                 <BoxSelectHandler onBoundsChange={handleBoxChange} />
 
-                {/* EEZ boundary loops */}
                 {eezLoops.map((loop, idx) => (
-                    <Polyline
-                        key={idx}
-                        positions={loop}
-                        pathOptions={EEZ_STYLE}
-                    />
+                    <Polyline key={idx} positions={loop} pathOptions={EEZ_STYLE} />
                 ))}
-                {/* Committed spatial bounding box */}
+
                 {toPositions(spatialBounds) && (
                     <Rectangle bounds={toPositions(spatialBounds)} pathOptions={BOX_STYLE} />
                 )}
-
-                {/* Live preview while dragging */}
                 {toPositions(previewBox) && (
                     <Rectangle
                         bounds={toPositions(previewBox)}
@@ -256,50 +271,53 @@ export default function MapView({
                     />
                 )}
 
-                {/* Station markers */}
+                {/* Station markers — shape by instrument, color by ship */}
                 {filteredStations.map((station, index) => {
                     const lat = Number(station.latitude);
                     const lon = Number(station.longitude);
                     if (isNaN(lat) || isNaN(lon)) return null;
 
                     const color      = shipColorMap[station.ship] || "#3498db";
+                    const icon       = makeInstrumentIcon(station.type, color);
                     const hasProfile = (
                         station.file_name &&
                         !["n/a", "nan"].includes(station.file_name.trim().toLowerCase())
                     );
 
                     return (
-                        <CircleMarker
-                            key={index}
-                            center={[lat, lon]}
-                            radius={6}
-                            pathOptions={{ color, fillColor: color, fillOpacity: 0.85, weight: 1 }}
+                        <Marker
+                            key={`${station.type}-${index}`}
+                            position={[lat, lon]}
+                            icon={icon}
                             eventHandlers={{ click: () => onSelectStation(station) }}
                         >
                             <Popup>
                                 <div className="popup-content">
-                                    <p><b>Instrument Type :</b> {station.type}</p>
-                                    <p><b>Ship:</b>     {station.ship}</p>
-                                    <p><b>Cruise:</b>   {station.cruise}</p>
-                                    <p><b>Station:</b>  {station.station}</p>
-                                    <p><b>Datetime:</b> {station.datetime}</p>
-                                    <p><b>Depth:</b>    {station.depth}</p>
-                                    <p><b>Lat:</b>      {lat.toFixed(4)}</p>
-                                    <p><b>Lon:</b>      {lon.toFixed(4)}</p>
+                                    <p><b>Instrument:</b> {station.type?.toUpperCase()}</p>
+                                    <p><b>Ship:</b>       {station.ship}</p>
+                                    <p><b>Cruise:</b>     {station.cruise}</p>
+                                    <p><b>Station:</b>    {station.station}</p>
+                                    <p><b>Datetime:</b>   {station.datetime}</p>
+                                    <p><b>Depth:</b>      {station.depth}</p>
+                                    <p><b>Lat:</b>        {lat.toFixed(4)}</p>
+                                    <p><b>Lon:</b>        {lon.toFixed(4)}</p>
                                     <button
                                         className="popup-profile-btn"
                                         type="button"
-                                        onClick={() => onOpenProfile(station.file_name)}
+                                        onClick={() => handleOpenProfile(station)}
                                         disabled={!hasProfile}
                                     >
                                         View Profile
                                     </button>
                                 </div>
                             </Popup>
-                        </CircleMarker>
+                        </Marker>
                     );
                 })}
             </MapContainer>
+
+            {/* Shift+drag hint — bottom-center of map, hides after box drawn */}
+            <ShiftDragHint spatialBounds={spatialBounds} />
 
             <Legend
                 activeShip={activeShip}
@@ -308,8 +326,13 @@ export default function MapView({
                 onSelectShip={setActiveShip}
             />
 
+            {/* Pass full station to ProfilePlots so it can include ?type= */}
             {profileFile && (
-                <ProfilePlots stationFile={profileFile} onClose={onCloseProfile} />
+                <ProfilePlots
+                    stationFile={profileFile}
+                    stationType={profileStation?.type}
+                    onClose={onCloseProfile}
+                />
             )}
         </div>
     );
