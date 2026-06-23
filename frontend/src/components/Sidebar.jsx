@@ -3,46 +3,89 @@
 // ==========================================
 
 // ==========================================
-// STATION DETAILS
+// INSTRUMENT KEY (shape legend)
 // ==========================================
-// function StationDetails({ station }) {
-//     if (!station) {
-//         return (
-//             <div className="details-card empty">
-//                 <h3>Details</h3>
-//                 <p>Select a station marker to view metadata and open its vertical profile.</p>
-//             </div>
-//         );
-//     }
+function InstrumentKey() {
+    const items = [
+        {
+            type: "CTD",
+            shape: (
+                <svg width="14" height="14" viewBox="0 0 14 14">
+                    <circle cx="7" cy="7" r="5.5" fill="#7ec8e3" stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
+                </svg>
+            ),
+        },
+        {
+            type: "XBT",
+            shape: (
+                <svg width="14" height="14" viewBox="0 0 14 14">
+                    <polygon points="7,1.5 13,12.5 1,12.5" fill="#7ec8e3" stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
+                </svg>
+            ),
+        },
+        {
+            type: "XCTD",
+            shape: (
+                <svg width="14" height="14" viewBox="0 0 14 14">
+                    <polygon points="7,1 13,7 7,13 1,7" fill="#7ec8e3" stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
+                </svg>
+            ),
+        },
+    ];
 
-//     const rows = [
-//         ["Ship",     station.ship],
-//         ["Cruise",   station.cruise],
-//         ["Station",  station.station],
-//         ["Datetime", station.datetime],
-//         ["Depth",    station.depth],
-//         ["Lat",      typeof station.latitude  === "number" ? station.latitude.toFixed(4)  : station.latitude],
-//         ["Lon",      typeof station.longitude === "number" ? station.longitude.toFixed(4) : station.longitude],
-//         ["Type",     station.type],
-//         ["File",     station.file_name],
-//     ];
+    return (
+        <section className="filter-card">
+            <h3>Instrument Types</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px" }}>
+                {items.map(({ type, shape }) => (
+                    <div key={type} style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", color: "#ccc" }}>
+                        {shape}
+                        <span>{type}</span>
+                    </div>
+                ))}
+            </div>
+            <p style={{ fontSize: "11px", color: "#666", marginTop: "8px", marginBottom: 0 }}>
+                Marker color indicates ship
+            </p>
+        </section>
+    );
+}
 
-//     return (
-//         <div className="details-card">
-//             <h3>Station Details</h3>
-//             <table className="details-table">
-//                 <tbody>
-//                     {rows.map(([label, value]) => (
-//                         <tr key={label}>
-//                             <td className="detail-label">{label}</td>
-//                             <td className="detail-value">{value ?? "N/A"}</td>
-//                         </tr>
-//                     ))}
-//                 </tbody>
-//             </table>
-//         </div>
-//     );
-// }
+// ==========================================
+// PER-TYPE LOADING INDICATORS
+// ==========================================
+function LoadingStatus({ loadingTypes, error }) {
+    const types = ["ctd", "xbt", "xctd"];
+    const anyLoading = loadingTypes && Object.values(loadingTypes).some(Boolean);
+
+    if (!anyLoading && !error) return null;
+
+    return (
+        <div style={{ padding: "6px 0" }}>
+            {types.map(t => {
+                const isLoading = loadingTypes?.[t];
+                if (!isLoading) return null;
+                return (
+                    <div key={t} style={{
+                        display: "flex", alignItems: "center", gap: "8px",
+                        fontSize: "12px", color: "#aaa", padding: "2px 0"
+                    }}>
+                        <div style={{
+                            width: "10px", height: "10px",
+                            border: "2px solid #444", borderTop: "2px solid #3498db",
+                            borderRadius: "50%",
+                            animation: "seasnap-spin 0.75s linear infinite",
+                            flexShrink: 0,
+                        }}/>
+                        Loading {t.toUpperCase()}…
+                    </div>
+                );
+            })}
+            {error && <p className="sidebar-status error" style={{ marginTop: "4px" }}>{error}</p>}
+            <style>{`@keyframes seasnap-spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+    );
+}
 
 // ==========================================
 // TEMPORAL FILTER
@@ -52,27 +95,15 @@ function TemporalFilter({ dateFrom, dateTo, onDateFromChange, onDateToChange, on
         <section className="filter-card">
             <div className="filter-header">
                 <h3>Time Range</h3>
-                <button type="button" className="reset-btn" onClick={onReset}>
-                    Reset
-                </button>
+                <button type="button" className="reset-btn" onClick={onReset}>Reset</button>
             </div>
-
             <label className="filter-label">
                 <span>From</span>
-                <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => onDateFromChange(e.target.value)}
-                />
+                <input type="date" value={dateFrom} onChange={(e) => onDateFromChange(e.target.value)} />
             </label>
-
             <label className="filter-label">
                 <span>To</span>
-                <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => onDateToChange(e.target.value)}
-                />
+                <input type="date" value={dateTo} onChange={(e) => onDateToChange(e.target.value)} />
             </label>
         </section>
     );
@@ -97,28 +128,14 @@ function SpatialBounds({ bounds, onClear }) {
         <section className="filter-card active-bounds">
             <div className="filter-header">
                 <h3>Spatial Filter</h3>
-                <button type="button" className="reset-btn" onClick={onClear}>
-                    Clear
-                </button>
+                <button type="button" className="reset-btn" onClick={onClear}>Clear</button>
             </div>
             <table className="bounds-table">
                 <tbody>
-                    <tr>
-                        <td>Lat min</td>
-                        <td>{bounds.latMin.toFixed(4)}°</td>
-                    </tr>
-                    <tr>
-                        <td>Lat max</td>
-                        <td>{bounds.latMax.toFixed(4)}°</td>
-                    </tr>
-                    <tr>
-                        <td>Lon min</td>
-                        <td>{bounds.lonMin.toFixed(4)}°</td>
-                    </tr>
-                    <tr>
-                        <td>Lon max</td>
-                        <td>{bounds.lonMax.toFixed(4)}°</td>
-                    </tr>
+                    <tr><td>Lat min</td><td>{bounds.latMin.toFixed(4)}°</td></tr>
+                    <tr><td>Lat max</td><td>{bounds.latMax.toFixed(4)}°</td></tr>
+                    <tr><td>Lon min</td><td>{bounds.lonMin.toFixed(4)}°</td></tr>
+                    <tr><td>Lon max</td><td>{bounds.lonMax.toFixed(4)}°</td></tr>
                 </tbody>
             </table>
         </section>
@@ -129,27 +146,22 @@ function SpatialBounds({ bounds, onClear }) {
 // SIDEBAR
 // ==========================================
 function Sidebar({
-    // station counts
     stationCount,
     filteredCount,
-    // search
     query,
     setQuery,
-    // load state
     loading,
     error,
     onRefresh,
-    // selected station
     selectedStation,
-    // temporal filter
     dateFrom,
     dateTo,
     onDateFromChange,
     onDateToChange,
     onDateReset,
-    // spatial filter
     spatialBounds,
     onSpatialClear,
+    loadingTypes,
 }) {
     return (
         <aside className="dashboard-sidebar">
@@ -157,9 +169,7 @@ function Sidebar({
 
                 <h2>SeaSnap</h2>
 
-                {/* ---------------------------------- */}
-                {/* SEARCH                             */}
-                {/* ---------------------------------- */}
+                {/* SEARCH */}
                 <section className="search-card">
                     <label>
                         <span>Search stations</span>
@@ -169,31 +179,22 @@ function Sidebar({
                             placeholder="Ship, station, cruise, file..."
                         />
                     </label>
-
                     <div className="count-row">
                         <strong>{filteredCount}</strong>
                         <span>shown of {stationCount}</span>
                     </div>
-
-                    <button
-                        type="button"
-                        onClick={onRefresh}
-                        disabled={loading}
-                    >
+                    <button type="button" onClick={onRefresh} disabled={loading}>
                         {loading ? "Loading..." : "Refresh Stations"}
                     </button>
                 </section>
 
-                {/* ---------------------------------- */}
-                {/* STATUS                             */}
-                {/* ---------------------------------- */}
-                {error && (
-                    <p className="sidebar-status error">{error}</p>
-                )}
+                {/* PER-TYPE LOADING + ERROR */}
+                <LoadingStatus loadingTypes={loadingTypes} error={error} />
 
-                {/* ---------------------------------- */}
-                {/* TEMPORAL FILTER                    */}
-                {/* ---------------------------------- */}
+                {/* INSTRUMENT KEY */}
+                <InstrumentKey />
+
+                {/* TEMPORAL FILTER */}
                 <TemporalFilter
                     dateFrom={dateFrom}
                     dateTo={dateTo}
@@ -202,18 +203,8 @@ function Sidebar({
                     onReset={onDateReset}
                 />
 
-                {/* ---------------------------------- */}
-                {/* SPATIAL FILTER                     */}
-                {/* ---------------------------------- */}
-                <SpatialBounds
-                    bounds={spatialBounds}
-                    onClear={onSpatialClear}
-                />
-
-                {/* ---------------------------------- */}
-                {/* STATION DETAILS                    */}
-                {/* ---------------------------------- */}
-                {/* <StationDetails station={selectedStation} /> */}
+                {/* SPATIAL FILTER */}
+                <SpatialBounds bounds={spatialBounds} onClear={onSpatialClear} />
 
             </div>
         </aside>
