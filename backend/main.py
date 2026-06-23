@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 import os
 import re
@@ -31,9 +32,9 @@ PROJECT_ROOT = os.path.dirname(BASE_DIR)
 DATA_DIR    = os.path.join(PROJECT_ROOT, "data")
 CACHE_DIR   = os.path.join(BASE_DIR, "cache")
 
-CTD_CACHE_DB = os.environ.get(
-    "SEASNAP_CTD_CACHE_DB",
-    os.path.join(CACHE_DIR, "ctd_profiles.sqlite"),
+CACHE_DB = os.environ.get(
+    "SEASNAP_CACHE_DB",
+    os.path.join(CACHE_DIR, "cache_profiles.sqlite"),
 )
 
 # ==========================================
@@ -194,11 +195,11 @@ def _meta_key(instrument_type: str, key: str) -> str:
 
 
 def _cache_is_current(instrument_type: str, folder: str) -> bool:
-    if not os.path.isfile(CTD_CACHE_DB):
+    if not os.path.isfile(CACHE_DB):
         return False
     latest = _folder_mtime(folder)
     try:
-        with sqlite3.connect(CTD_CACHE_DB) as conn:
+        with sqlite3.connect(CACHE_DB) as conn:
             rows = dict(conn.execute("SELECT key, value FROM metadata").fetchall())
     except sqlite3.OperationalError:
         return False
@@ -209,94 +210,210 @@ def _cache_is_current(instrument_type: str, folder: str) -> bool:
 
 
 def _build_cache(instrument_type: str, folder: str) -> None:
-    """(Re)build the SQLite table for one instrument type."""
     cfg = INSTRUMENT_CONFIG[instrument_type]
+
     table        = cfg["table"]
     column_map   = cfg["column_map"]
     out_cols     = cfg["output_columns"]
     usecols_set  = set(column_map.keys())
+
     csv_files    = _csv_files(folder)
     latest_mtime = _folder_mtime(folder)
 
     os.makedirs(CACHE_DIR, exist_ok=True)
-    print(f"[{instrument_type}] Building cache from {len(csv_files)} file(s) in: {folder}")
+
+    print(
+        f"[{instrument_type}] Building cache from "
+        f"{len(csv_files)} file(s) in: {folder}"
+    )
 
     col_defs = ", ".join(
         f'"{c}" {"INTEGER" if c in QC_COLUMNS else "REAL"}'
         for c in out_cols
     )
 
-    with sqlite3.connect(CTD_CACHE_DB, isolation_level=None) as conn:
+    with sqlite3.connect(CACHE_DB) as conn:
+
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS metadata "
-            "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-        )
-        conn.execute(f"DROP TABLE IF EXISTS {table}")
-        conn.execute(f"CREATE TABLE {table} (stem TEXT NOT NULL, {col_defs})")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.execute("PRAGMA cache_size=-100000")
 
-        total = 0
-        conn.execute("BEGIN")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+
+        conn.execute(
+            f"""
+            CREATE TABLE {table} (
+                stem TEXT NOT NULL,
+                {col_defs}
+            )
+            """
+        )
+
+        total_rows = 0
 
         for csv_path in csv_files:
+
             fname = os.path.basename(csv_path)
+
+            print(f"[{instrument_type}] Reading {fname}")
+
             file_rows = 0
 
             for chunk in pd.read_csv(
                 csv_path,
                 usecols=lambda c: c.strip() in usecols_set,
-                chunksize=100_000,
+                chunksize=200_000,      # increased from 100k
                 low_memory=False,
             ):
+
                 chunk.columns = chunk.columns.str.strip()
+
                 chunk = chunk.rename(columns=column_map)
-                # Drop collisions from rename (keep last = QC-corrected value)
-                chunk = chunk.loc[:, ~chunk.columns.duplicated(keep="last")]
+
+                chunk = chunk.loc[
+                    :,
+                    ~chunk.columns.duplicated(keep="last")
+                ]
 
                 if "SourceFile" not in chunk.columns:
-                    raise ValueError(f"No SourceFile column in {csv_path}.")
+                    raise ValueError(
+                        f"No SourceFile column in {csv_path}"
+                    )
 
                 chunk["stem"] = (
-                    chunk["SourceFile"].astype(str)
-                    .str.rsplit(".", n=1).str[0]
-                    .str.strip().str.lower()
+                    chunk["SourceFile"]
+                    .astype(str)
+                    .str.rsplit(".", n=1)
+                    .str[0]
+                    .str.strip()
+                    .str.lower()
                 )
 
-                chunk = chunk.reindex(columns=["stem"] + out_cols)
+                chunk = chunk.reindex(
+                    columns=["stem"] + out_cols
+                )
+
                 for col in out_cols:
-                    chunk[col] = pd.to_numeric(chunk[col], errors="coerce")
-                chunk = chunk.dropna(subset=["stem", "depSM"])
+                    chunk[col] = pd.to_numeric(
+                        chunk[col],
+                        errors="coerce"
+                    )
 
-                chunk.to_sql(table, conn, if_exists="append", index=False)
-                file_rows += len(chunk)
-                total     += len(chunk)
+                chunk = chunk.dropna(
+                    subset=["stem", "depSM"]
+                )
 
-            print(f"  {fname}: {file_rows:,} rows  (total {total:,})")
+                rows = len(chunk)
 
-        conn.execute("COMMIT")
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_stem ON {table}(stem)")
-        conn.execute(
-            "INSERT OR REPLACE INTO metadata VALUES (?, ?)",
-            (_meta_key(instrument_type, "source_path"), folder),
+                chunk.to_sql(
+                    table,
+                    conn,
+                    if_exists="append",
+                    index=False,
+                    method="multi",
+                    chunksize=5000,
+                )
+
+                file_rows += rows
+                total_rows += rows
+
+            print(
+                f"  {fname}: "
+                f"{file_rows:,} rows "
+                f"(total {total_rows:,})"
+            )
+
+        print(
+            f"[{instrument_type}] Creating stem index..."
         )
+
         conn.execute(
-            "INSERT OR REPLACE INTO metadata VALUES (?, ?)",
-            (_meta_key(instrument_type, "source_mtime"), str(latest_mtime)),
+            f"""
+            CREATE INDEX IF NOT EXISTS
+            idx_{table}_stem
+            ON {table}(stem)
+            """
         )
 
-    print(f"[{instrument_type}] Cache ready: {total:,} rows.")
+        count = conn.execute(
+            f"SELECT COUNT(*) FROM {table}"
+        ).fetchone()[0]
+
+        print(
+            f"[{instrument_type}] "
+            f"Table rows verified: {count:,}"
+        )
+
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO metadata
+            VALUES (?, ?)
+            """,
+            (
+                _meta_key(
+                    instrument_type,
+                    "source_path"
+                ),
+                folder,
+            ),
+        )
+
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO metadata
+            VALUES (?, ?)
+            """,
+            (
+                _meta_key(
+                    instrument_type,
+                    "source_mtime"
+                ),
+                str(latest_mtime),
+            ),
+        )
+
+    print(
+        f"[{instrument_type}] "
+        f"Cache ready: {total_rows:,} rows."
+    )
 
 
 def ensure_cache(instrument_type: str) -> str:
-    """Return data folder, building/validating cache as needed."""
-    folder = _resolve_folder(instrument_type)
-    if not _cache_is_current(instrument_type, folder):
-        _build_cache(instrument_type, folder)
-    else:
-        print(f"[{instrument_type}] Cache is current.")
-    return folder
 
+    folder = _resolve_folder(instrument_type)
+
+    current = _cache_is_current(
+        instrument_type,
+        folder
+    )
+
+    print(
+        f"[{instrument_type}] "
+        f"Cache current = {current}"
+    )
+
+    if not current:
+        _build_cache(
+            instrument_type,
+            folder
+        )
+    else:
+        print(
+            f"[{instrument_type}] "
+            f"Cache is current."
+        )
+
+    return folder
 
 # ==========================================
 # METADATA LOADING
@@ -407,6 +524,39 @@ def _df_to_stations(df: pd.DataFrame, instrument_type: str) -> list[dict]:
             print(f"[{instrument_type}] Skipping row: {e}")
     return stations
 
+class SpatialBox(BaseModel):
+    latMin: float
+    latMax: float
+    lonMin: float
+    lonMax: float
+    
+def _stations_in_box(box: SpatialBox):
+    stations = []
+
+    for instrument_type in ["ctd", "xbt", "xctd"]:
+
+        if instrument_type not in _station_cache:
+            try:
+                load_meta(type=instrument_type)
+            except Exception:
+                continue
+
+        for station in _station_cache.get(instrument_type, []):
+
+            lat = float(station["latitude"])
+            lon = float(station["longitude"])
+
+            if (
+                box.latMin <= lat <= box.latMax
+                and
+                box.lonMin <= lon <= box.lonMax
+            ):
+                stations.append(station)
+
+    return stations
+
+
+
 
 # ==========================================
 # API ENDPOINTS
@@ -469,13 +619,22 @@ def get_profile(station_file: str, type: str = Query(None)):
         table    = cfg["table"]
         out_cols = cfg["output_columns"]
 
-        ensure_cache(instrument_type)
+        folder = _resolve_folder(instrument_type)
+
+        if not _cache_is_current(
+            instrument_type,
+            folder
+        ):
+            _build_cache(
+                instrument_type,
+                folder
+            )
 
         col_list = ", ".join(f'"{c}"' for c in out_cols)
         query    = f'SELECT {col_list} FROM {table} WHERE stem = ? ORDER BY depSM'
 
         try:
-            with sqlite3.connect(CTD_CACHE_DB) as conn:
+            with sqlite3.connect(CACHE_DB) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(query, (stem,)).fetchall()
         except sqlite3.OperationalError:
@@ -497,3 +656,98 @@ def get_profile(station_file: str, type: str = Query(None)):
         status_code=404,
         detail=f"No profile found for '{stem}' in instrument type '{type or 'any'}'"
     )
+
+@app.post("/spatial-profile")
+def get_spatial_profile(box: SpatialBox):
+
+    selected_stations = _stations_in_box(box)
+
+    if not selected_stations:
+        return {
+            "mode": "spatial",
+            "station_count": 0,
+            "row_count": 0,
+            "data": [],
+        }
+
+    merged_rows = []
+
+    counts = {
+        "ctd": 0,
+        "xbt": 0,
+        "xctd": 0,
+    }
+
+    with sqlite3.connect(CACHE_DB) as conn:
+
+        conn.row_factory = sqlite3.Row
+
+        for station in selected_stations:
+
+            instrument_type = station["type"]
+
+            counts[instrument_type] += 1
+
+            stem = (
+                station["file_name"]
+                .strip()
+                .rsplit(".", 1)[0]
+                .lower()
+            )
+
+            cfg = INSTRUMENT_CONFIG[instrument_type]
+
+            table = cfg["table"]
+
+            out_cols = cfg["output_columns"]
+
+            col_list = ", ".join(
+                f'"{c}"'
+                for c in out_cols
+            )
+
+            query = (
+                f"SELECT {col_list} "
+                f"FROM {table} "
+                f"WHERE stem = ? "
+                f"ORDER BY depSM"
+            )
+
+            rows = conn.execute(
+                query,
+                (stem,)
+            ).fetchall()
+
+            out_col_set = set(out_cols)
+
+            for row in rows:
+
+                merged_rows.append(
+                    {
+                        **{
+                            col: (
+                                row[col]
+                                if col in out_col_set
+                                else None
+                            )
+                            for col in ALL_OUTPUT_COLUMNS
+                        },
+
+                        "instrument_type": instrument_type,
+                        "station_file": station["file_name"],
+                    }
+                )
+
+    return {
+        "mode": "spatial",
+
+        "station_count": len(selected_stations),
+
+        "ctd_count": counts["ctd"],
+        "xbt_count": counts["xbt"],
+        "xctd_count": counts["xctd"],
+
+        "row_count": len(merged_rows),
+
+        "data": merged_rows,
+    }

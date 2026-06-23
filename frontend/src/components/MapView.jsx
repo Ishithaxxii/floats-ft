@@ -201,8 +201,13 @@ export default function MapView({
     onOpenProfile,
     profileFile,
     onCloseProfile,
+
     spatialBounds,
     onSpatialBoundsChange,
+
+    spatialProfileData,
+    showSpatialProfile,
+    onCloseSpatialProfile,
 }) {
     const [activeShip, setActiveShip] = useState("all");
     const [eezLoops,   setEezLoops]   = useState([]);
@@ -327,11 +332,21 @@ export default function MapView({
             />
 
             {/* Pass full station to ProfilePlots so it can include ?type= */}
-            {profileFile && (
+            {/* Single station profile */}
+            {profileFile && !showSpatialProfile && (
                 <ProfilePlots
                     stationFile={profileFile}
                     stationType={profileStation?.type}
                     onClose={onCloseProfile}
+                />
+            )}
+
+            {/* Spatial merged profile */}
+            {showSpatialProfile && spatialProfileData && (
+                <ProfilePlots
+                    isSpatial={true}
+                    spatialData={spatialProfileData}
+                    onClose={onCloseSpatialProfile}
                 />
             )}
         </div>

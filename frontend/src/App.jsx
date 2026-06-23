@@ -42,10 +42,12 @@ function App() {
     const [selectedStation, setSelectedStation] = useState(null);
     const [profileFile,     setProfileFile]     = useState(null);
 
+    
     const [dateFrom, setDateFrom] = useState(getTwoYearsAgo);
     const [dateTo,   setDateTo]   = useState(TODAY);
     const [spatialBounds, setSpatialBounds] = useState(null);
-
+    const [spatialProfileData, setSpatialProfileData] = useState(null);
+    const [showSpatialProfile, setShowSpatialProfile] = useState(false);
     // ----------------------------------------
     // Load one instrument type and merge into stations
     // ----------------------------------------
@@ -139,6 +141,31 @@ function App() {
         setDateTo(TODAY);
     }, []);
 
+    useEffect(() => {
+        if (!spatialBounds) {
+            setSpatialProfileData(null);
+            setShowSpatialProfile(false);
+            return;
+        }
+
+        fetch(`${API}/spatial-profile`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(spatialBounds),
+        })
+            .then(res => res.json())
+            .then(data => {
+                setSpatialProfileData(data);
+                setShowSpatialProfile(true);
+            })
+            .catch(err => {
+                console.error(err);
+            });
+
+    }, [spatialBounds]);
+
     return (
         <div className="app-container">
             <Navbar />
@@ -150,7 +177,9 @@ function App() {
                     setQuery={setQuery}
                     loading={loading}
                     error={errorMsg}
-                    onRefresh={() => INSTRUMENT_TYPES.forEach(loadType)}
+                    onRefresh={() =>
+                        INSTRUMENT_TYPES.forEach(type => loadType(type))
+                    }
                     selectedStation={selectedStation}
                     dateFrom={dateFrom}
                     dateTo={dateTo}
@@ -169,8 +198,15 @@ function App() {
                         onOpenProfile={setProfileFile}
                         profileFile={profileFile}
                         onCloseProfile={() => setProfileFile(null)}
+
                         spatialBounds={spatialBounds}
                         onSpatialBoundsChange={setSpatialBounds}
+
+                        spatialProfileData={spatialProfileData}
+                        showSpatialProfile={showSpatialProfile}
+                        onCloseSpatialProfile={() =>
+                            setShowSpatialProfile(false)
+                        }
                     />
                 </div>
             </div>

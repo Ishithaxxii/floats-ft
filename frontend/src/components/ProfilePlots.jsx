@@ -186,22 +186,50 @@ function DepthProfile({ data, config }) {
 // ==========================================
 // INNER PROFILE PANEL (wrapped by error boundary)
 // ==========================================
-function ProfilePanel({ stationFile, stationType, onClose }) {
+function ProfilePanel({
+    stationFile,
+    stationType,
+
+    isSpatial = false,
+    spatialData = null,
+
+    onClose
+}) {
     const [profileResult, setProfileResult] = useState({ stationFile: null, data: [], error: null });
     const [isLoading,     setIsLoading]     = useState(false);
 
     useEffect(() => {
-        if (!stationFile) return;
-        let cancelled = false;
 
-        setIsLoading(true);
+    if (isSpatial) {
 
-        // Always pass ?type= so the backend searches only the correct table
-        // and avoids stem collisions between instruments (e.g. 1107 in xbt + xctd)
-        const typeParam = stationType ? `&type=${stationType}` : "";
-        const url = `${API}/profile/${encodeURIComponent(stationFile)}?_=${Date.now()}${typeParam}`;
+        setProfileResult({
+            stationFile: "spatial",
+            data: spatialData?.data || [],
+            error: null,
+        });
 
-        fetch(url)
+        setIsLoading(false);
+
+        return;
+    }
+
+    if (!stationFile) return;
+
+    let cancelled = false;
+
+    setIsLoading(true);
+
+    const typeParam =
+        stationType
+            ? `&type=${stationType}`
+            : "";
+
+    const url =
+        `${API}/profile/${encodeURIComponent(
+            stationFile
+        )}?_=${Date.now()}${typeParam}`;
+
+    fetch(url)
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
@@ -220,7 +248,12 @@ function ProfilePanel({ stationFile, stationType, onClose }) {
             });
 
         return () => { cancelled = true; };
-    }, [stationFile, stationType]);
+    },[
+        stationFile,
+        stationType,
+        isSpatial,
+        spatialData
+    ]);
 
     const isCurrentProfile = profileResult.stationFile === stationFile;
     const error            = isCurrentProfile ? profileResult.error : null;
@@ -237,18 +270,23 @@ function ProfilePanel({ stationFile, stationType, onClose }) {
                     <div>
                         <h2 className="profile-title">Vertical Profiles</h2>
                         <p className="profile-subtitle">
-                            {stationFile}
-                            {stationType && (
-                                <span style={{
-                                    marginLeft:      "8px",
-                                    fontSize:        "11px",
-                                    background:      "#2a2a3e",
-                                    color:           "#7ec8e3",
-                                    padding:         "2px 7px",
-                                    borderRadius:    "3px",
-                                    textTransform:   "uppercase",
-                                    letterSpacing:   "0.05em",
-                                }}>
+                            {isSpatial
+                                ? "Spatial Region Selection"
+                                : stationFile}
+
+                            {!isSpatial && stationType && (
+                                <span
+                                    style={{
+                                        marginLeft: "8px",
+                                        fontSize: "11px",
+                                        background: "#2a2a3e",
+                                        color: "#7ec8e3",
+                                        padding: "2px 7px",
+                                        borderRadius: "3px",
+                                        textTransform: "uppercase",
+                                        letterSpacing: "0.05em",
+                                    }}
+                                >
                                     {stationType}
                                 </span>
                             )}
@@ -269,6 +307,50 @@ function ProfilePanel({ stationFile, stationType, onClose }) {
                 {!isLoading && !error && (
                     <>
                         <div className="profile-ts-section">
+                            {isSpatial && spatialData && (
+                                <div
+                                    style={{
+                                        marginBottom: "15px",
+                                        padding: "10px",
+                                        background: "#1f2330",
+                                        borderRadius: "6px",
+                                        fontSize: "13px",
+                                        color: "#ddd",
+                                    }}
+                                >
+                                    <div>
+                                        Stations:
+                                        {" "}
+                                        {spatialData.station_count}
+                                    </div>
+
+                                    <div>
+                                        CTD:
+                                        {" "}
+                                        {spatialData.ctd_count}
+                                    </div>
+
+                                    <div>
+                                        XBT:
+                                        {" "}
+                                        {spatialData.xbt_count}
+                                    </div>
+
+                                    <div>
+                                        XCTD:
+                                        {" "}
+                                        {spatialData.xctd_count}
+                                    </div>
+
+                                    <div>
+                                        Observations:
+                                        {" "}
+                                        {spatialData.row_count}
+                                    </div>
+
+                                </div>
+
+                            )}
                             <TSDiagram data={profileData} />
                         </div>
                         <div className="profile-charts-grid">
@@ -289,14 +371,26 @@ function ProfilePanel({ stationFile, stationType, onClose }) {
 // ==========================================
 // EXPORTED COMPONENT — error boundary wraps everything
 // ==========================================
-function ProfilePlots({ stationFile, stationType, onClose }) {
+function ProfilePlots({
+    stationFile,
+    stationType,
+
+    isSpatial = false,
+    spatialData = null,
+
+    onClose
+}){
     return (
         <ProfileErrorBoundary onClose={onClose}>
             <ProfilePanel
-                stationFile={stationFile}
-                stationType={stationType}
-                onClose={onClose}
-            />
+            stationFile={stationFile}
+            stationType={stationType}
+
+            isSpatial={isSpatial}
+            spatialData={spatialData}
+
+            onClose={onClose}
+        />
         </ProfileErrorBoundary>
     );
 }
