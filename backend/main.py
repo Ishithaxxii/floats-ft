@@ -532,29 +532,16 @@ class SpatialBox(BaseModel):
     
 def _stations_in_box(box: SpatialBox):
     stations = []
-
     for instrument_type in ["ctd", "xbt", "xctd"]:
-
-        if instrument_type not in _station_cache:
-            try:
-                load_meta(type=instrument_type)
-            except Exception:
-                continue
-
+        # Only use already-cached data — don't block on loading
+        # If cache is empty, those stations simply won't appear in spatial results
         for station in _station_cache.get(instrument_type, []):
-
             lat = float(station["latitude"])
             lon = float(station["longitude"])
-
-            if (
-                box.latMin <= lat <= box.latMax
-                and
-                box.lonMin <= lon <= box.lonMax
-            ):
+            if (box.latMin <= lat <= box.latMax and
+                box.lonMin <= lon <= box.lonMax):
                 stations.append(station)
-
     return stations
-
 
 
 

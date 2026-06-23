@@ -112,7 +112,7 @@ function TemporalFilter({ dateFrom, dateTo, onDateFromChange, onDateToChange, on
 // ==========================================
 // SPATIAL BOUNDS DISPLAY
 // ==========================================
-function SpatialBounds({ bounds, onClear }) {
+function SpatialBounds({ bounds, onClear, spatialLoading, spatialProfileData, onViewSpatialProfile }) {
     if (!bounds) {
         return (
             <section className="filter-card">
@@ -138,6 +138,47 @@ function SpatialBounds({ bounds, onClear }) {
                     <tr><td>Lon max</td><td>{bounds.lonMax.toFixed(4)}°</td></tr>
                 </tbody>
             </table>
+
+            {/* Loading indicator while spatial fetch is in progress */}
+            {spatialLoading && (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", fontSize: "12px", color: "#aaa" }}>
+                    <div style={{
+                        width: "10px", height: "10px", flexShrink: 0,
+                        border: "2px solid #444", borderTop: "2px solid #3498db",
+                        borderRadius: "50%", animation: "seasnap-spin 0.75s linear infinite",
+                    }}/>
+                    Fetching profiles for this region… this may take a moment.
+                    <style>{`@keyframes seasnap-spin { to { transform: rotate(360deg); } }`}</style>
+                </div>
+            )}
+
+            {/* Button to (re)open spatial profile panel once data is ready */}
+            {!spatialLoading && spatialProfileData && spatialProfileData.station_count > 0 && (
+                <button
+                    type="button"
+                    onClick={onViewSpatialProfile}
+                    style={{
+                        marginTop:    "10px",
+                        width:        "100%",
+                        padding:      "7px 0",
+                        background:   "#1a6fa8",
+                        color:        "#fff",
+                        border:       "none",
+                        borderRadius: "5px",
+                        fontSize:     "13px",
+                        cursor:       "pointer",
+                    }}
+                >
+                    View Region Profiles ({spatialProfileData.station_count} stations,{" "}
+                    {spatialProfileData.row_count?.toLocaleString()} obs)
+                </button>
+            )}
+
+            {!spatialLoading && spatialProfileData && spatialProfileData.station_count === 0 && (
+                <p style={{ fontSize: "12px", color: "#888", marginTop: "8px" }}>
+                    No stations found in this region.
+                </p>
+            )}
         </section>
     );
 }
@@ -162,6 +203,9 @@ function Sidebar({
     spatialBounds,
     onSpatialClear,
     loadingTypes,
+    spatialLoading,
+    spatialProfileData,
+    onViewSpatialProfile,
 }) {
     return (
         <aside className="dashboard-sidebar">
@@ -204,7 +248,13 @@ function Sidebar({
                 />
 
                 {/* SPATIAL FILTER */}
-                <SpatialBounds bounds={spatialBounds} onClear={onSpatialClear} />
+                <SpatialBounds
+                    bounds={spatialBounds}
+                    onClear={onSpatialClear}
+                    spatialLoading={spatialLoading}
+                    spatialProfileData={spatialProfileData}
+                    onViewSpatialProfile={onViewSpatialProfile}
+                />
 
             </div>
         </aside>

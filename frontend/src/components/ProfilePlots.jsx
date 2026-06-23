@@ -255,10 +255,13 @@ function ProfilePanel({
         spatialData
     ]);
 
-    const isCurrentProfile = profileResult.stationFile === stationFile;
-    const error            = isCurrentProfile ? profileResult.error : null;
-    const profileData      = isCurrentProfile ? profileResult.data  : [];
 
+    const isCurrentProfile = profileResult.stationFile === stationFile;
+    const error      = isSpatial ? null : (isCurrentProfile ? profileResult.error : null);
+    const profileData = isSpatial
+        ? (spatialData?.data || [])
+        : (isCurrentProfile ? profileResult.data : []);
+        
     const availablePlots = PLOT_CONFIGS.filter(cfg =>
         profileData.some(d => d[cfg.key] != null)
     );
