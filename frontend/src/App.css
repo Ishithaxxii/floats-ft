@@ -648,13 +648,13 @@ html, body, #root {
     color: #555;
     cursor: not-allowed;
 }
-
 .ts-diagram-container {
     display: flex;
     flex-direction: row;
     align-items: flex-start;
     gap: 16px;
     width: 100%;
+    background: #1e1e2e;
 }
 
 .ts-diagram-plot {
@@ -664,8 +664,8 @@ html, body, #root {
 
 .qc-summary-panel {
     flex: 0 0 240px;
-    background: #f8f9fa;
-    border: 1px solid #ddd;
+    background: #2a2a3a;
+    border: 1px solid #444;
     border-radius: 8px;
     padding: 16px;
     margin-top: 60px;
@@ -675,7 +675,7 @@ html, body, #root {
     margin: 0 0 12px 0;
     font-size: 18px;
     font-weight: 700;
-    color: #222;
+    color: #eaeaea;
 }
 
 .qc-summary-table {
@@ -690,7 +690,7 @@ html, body, #root {
 }
 
 .qc-summary-label {
-    color: #333;
+    color: #ccc;
     padding-right: 12px;
 }
 

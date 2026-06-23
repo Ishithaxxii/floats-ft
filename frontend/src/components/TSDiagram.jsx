@@ -1,12 +1,11 @@
-import PlotModule from "react-plotly.js";
-const Plot = PlotModule.default;
+import Plot from "react-plotly.js";
 
 const QC_COLORS = {
-    1: "#2ca02c",
+    1: "#2ecc71",
     2: "#f1c40f",
     3: "#ff8c00",
-    4: "#ff0000",
-    9: "#808080",
+    4: "#e74c3c",
+    9: "#95a5a6",
 };
 
 const QC_LABELS = {
@@ -20,9 +19,7 @@ const QC_LABELS = {
 // ==========================================
 // SIGMA-T (UNESCO/EOS-80) DENSITY HELPER
 // ==========================================
-// Computes sigma-t = rho(S, T, 0) - 1000 at atmospheric pressure
 function sigmaT(S, T) {
-    // Density of pure water (kg/m^3)
     const rho0 =
         999.842594 +
         6.793952e-2 * T -
@@ -38,84 +35,52 @@ function sigmaT(S, T) {
         8.2467e-7 * T ** 3 +
         5.3875e-9 * T ** 4;
 
-    const B =
-        -5.72466e-3 +
-        1.0227e-4 * T -
-        1.6546e-6 * T ** 2;
+    const B = -5.72466e-3 + 1.0227e-4 * T - 1.6546e-6 * T ** 2;
 
     const C = 4.8314e-4;
 
-    const rho = rho0 + A * S + B * S ** 1.5 + C * S ** 2;
-
-    return rho - 1000;
+    return rho0 + A * S + B * S ** 1.5 + C * S ** 2 - 1000;
 }
 
-// Build contour line traces for a set of sigma-t levels over a S/T grid
 function buildSigmaTContours(salinityRange, tempRange) {
     const [sMin, sMax] = salinityRange;
     const [tMin, tMax] = tempRange;
 
-    const nS = 60;
-    const nT = 60;
+    const n = 40;
+    const sStep = (sMax - sMin) / n;
+    const tStep = (tMax - tMin) / n;
 
-    const sStep = (sMax - sMin) / nS;
-    const tStep = (tMax - tMin) / nT;
+    const sVals = Array.from({ length: n + 1 }, (_, i) => sMin + i * sStep);
+    const tVals = Array.from({ length: n + 1 }, (_, j) => tMin + j * tStep);
+    const grid = tVals.map(t => sVals.map(s => sigmaT(s, t)));
 
-    // Determine sigma-t range across the grid corners to pick sensible levels
-    const corners = [
-        sigmaT(sMin, tMin),
-        sigmaT(sMin, tMax),
-        sigmaT(sMax, tMin),
-        sigmaT(sMax, tMax),
-    ];
+    const corners = [grid[0][0], grid[0][n], grid[n][0], grid[n][n]];
     const sigmaMin = Math.floor(Math.min(...corners));
     const sigmaMax = Math.ceil(Math.max(...corners));
 
-    const levels = [];
-    for (let lvl = sigmaMin; lvl <= sigmaMax; lvl++) {
-        levels.push(lvl);
-    }
-
-    // Precompute grid of sigma-t values
-    const sVals = [];
-    for (let i = 0; i <= nS; i++) sVals.push(sMin + i * sStep);
-    const tVals = [];
-    for (let j = 0; j <= nT; j++) tVals.push(tMin + j * tStep);
-
-    const grid = tVals.map(t => sVals.map(s => sigmaT(s, t)));
-
     const traces = [];
 
-    levels.forEach(level => {
-        // March through grid cells, find segments where grid crosses `level`
-        const xs = [];
-        const ys = [];
+    for (let level = sigmaMin; level <= sigmaMax; level++) {
+        const points = [];
 
-        for (let j = 0; j < nT; j++) {
-            for (let i = 0; i < nS; i++) {
+        for (let j = 0; j < n; j++) {
+            for (let i = 0; i < n; i++) {
                 const v00 = grid[j][i];
                 const v10 = grid[j][i + 1];
                 const v01 = grid[j + 1][i];
 
-                // horizontal edge crossing (between i and i+1 at row j)
                 if ((v00 - level) * (v10 - level) < 0) {
                     const frac = (level - v00) / (v10 - v00);
-                    xs.push(sVals[i] + frac * sStep);
-                    ys.push(tVals[j]);
+                    points.push({ x: sVals[i] + frac * sStep, y: tVals[j] });
                 }
-                // vertical edge crossing (between j and j+1 at col i)
                 if ((v00 - level) * (v01 - level) < 0) {
                     const frac = (level - v00) / (v01 - v00);
-                    xs.push(sVals[i]);
-                    ys.push(tVals[j] + frac * tStep);
+                    points.push({ x: sVals[i], y: tVals[j] + frac * tStep });
                 }
             }
         }
 
-        if (xs.length === 0) return;
-
-        // Sort points along salinity so the line draws left-to-right cleanly
-        const points = xs.map((x, idx) => ({ x, y: ys[idx] }));
+        if (points.length === 0) continue;
         points.sort((a, b) => a.x - b.x);
 
         traces.push({
@@ -123,26 +88,24 @@ function buildSigmaTContours(salinityRange, tempRange) {
             y: points.map(p => p.y),
             mode: "lines",
             type: "scatter",
-            line: { color: "rgba(150,150,150,0.6)", width: 1, dash: "solid" },
+            line: { color: "rgba(150,150,170,0.6)", width: 2 },
             hoverinfo: "skip",
             showlegend: false,
-            name: `σt = ${level}`,
         });
 
-        // Label near the rightmost (or topmost) point of the contour
-        const labelPoint = points[points.length - 1];
+        const lp = points[points.length - 1];
         traces.push({
-            x: [labelPoint.x],
-            y: [labelPoint.y],
+            x: [lp.x],
+            y: [lp.y],
             mode: "text",
             type: "scatter",
             text: [`${level}`],
             textposition: "top right",
-            textfont: { color: "#999999", size: 11 },
+            textfont: { color: "#7f8c9a", size: 11 },
             hoverinfo: "skip",
             showlegend: false,
         });
-    });
+    }
 
     return traces;
 }
@@ -170,10 +133,7 @@ function QCSummary({ data }) {
                         return (
                             <tr key={qc}>
                                 <td className="qc-summary-label">{QC_LABELS[qc]}</td>
-                                <td
-                                    className="qc-summary-value"
-                                    style={{ color: QC_COLORS[qc] }}
-                                >
+                                <td className="qc-summary-value" style={{ color: QC_COLORS[qc] }}>
                                     {count.toLocaleString()} ({pct}%)
                                 </td>
                             </tr>
@@ -207,8 +167,9 @@ export default function TSDiagram({ data }) {
             name: QC_LABELS[qc],
             marker: {
                 color: QC_COLORS[qc],
-                size: 7,
-                opacity: 0.8,
+                size: 11,
+                opacity: 0.9,
+                line: { width: 0 },
             },
             customdata: filtered.map(d => [d.depSM, d.ALL_TESTS_QC]),
             hovertemplate:
@@ -220,10 +181,7 @@ export default function TSDiagram({ data }) {
         };
     });
 
-    // Compute axis ranges from valid points for contour generation
-    const validPoints = data.filter(
-        d => d.SAL_QC_VAR != null && d.TEMP_QC_VAR != null
-    );
+    const validPoints = data.filter(d => d.SAL_QC_VAR != null && d.TEMP_QC_VAR != null);
     const salinities = validPoints.map(d => d.SAL_QC_VAR);
     const temps = validPoints.map(d => d.TEMP_QC_VAR);
 
@@ -232,7 +190,6 @@ export default function TSDiagram({ data }) {
     const tMin = Math.min(...temps);
     const tMax = Math.max(...temps);
 
-    // Pad ranges slightly so contours cover the full plot area
     const sPad = (sMax - sMin) * 0.05 || 0.1;
     const tPad = (tMax - tMin) * 0.05 || 0.1;
 
@@ -243,6 +200,17 @@ export default function TSDiagram({ data }) {
 
     const plotData = [...contourTraces, ...qcGroups];
 
+    const axisStyle = {
+        gridcolor: "#3a3a4a",
+        gridwidth: 1.5,
+        zerolinecolor: "#3a3a4a",
+        zerolinewidth: 1.5,
+        tickfont: { size: 14, color: "#aaa" },
+        titlefont: { size: 18, color: "#aaa" },
+        linecolor: "#444",
+        linewidth: 2,
+    };
+
     return (
         <div className="ts-diagram-container">
             <div className="ts-diagram-plot">
@@ -250,30 +218,26 @@ export default function TSDiagram({ data }) {
                     data={plotData}
                     layout={{
                         title: {
-                            text: "Temperature–Salinity Diagram Colored by ALL_TESTS_QC",
-                            font: { size: 24 }
+                            text: "Temperature–Salinity Diagram (QC Colored)",
+                            font: { size: 24, color: "#eaeaea" },
                         },
                         autosize: true,
-                        paper_bgcolor: "#ffffff",
-                        plot_bgcolor: "#ffffff",
-                        xaxis: {
-                            title: "Salinity (psu)",
-                            tickfont: { size: 14 },
-                            titlefont: { size: 18 }
-                        },
-                        yaxis: {
-                            title: "Potential Temperature (°C)",
-                            tickfont: { size: 14 },
-                            titlefont: { size: 18 }
-                        },
+                        paper_bgcolor: "#1e1e2e",
+                        plot_bgcolor: "#1e1e2e",
+                        font: { color: "#aaa" },
+                        xaxis: { title: "Salinity (psu)", ...axisStyle },
+                        yaxis: { title: "Potential Temperature (°C)", ...axisStyle },
                         legend: {
                             x: 1.02,
                             y: 1,
+                            bgcolor: "#1e1e2e",
+                            bordercolor: "#444",
                             borderwidth: 1,
+                            font: { color: "#aaa" },
                         },
-                        margin: { l: 80, r: 250, t: 80, b: 80 }
+                        margin: { l: 80, r: 220, t: 80, b: 80 },
                     }}
-                    style={{ width: "100%", height: "800px" }}
+                    style={{ width: "100%", height: "900px" }}
                     config={{ responsive: true, displaylogo: false }}
                 />
             </div>

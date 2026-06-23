@@ -449,17 +449,20 @@ def get_stations(type: str = Query("ctd")):
 
     return {"stations": _station_cache.get(instrument_type, [])}
 
-
 @app.get("/profile/{station_file:path}")
 def get_profile(station_file: str, type: str = Query(None)):
     station_file = station_file.strip()
     stem = re.sub(r"_metadata\.csv$", "", station_file, flags=re.IGNORECASE)
     stem = stem.rsplit(".", 1)[0].strip().lower()
 
-    search_types = (
-        [type.lower()] if type and type.lower() in INSTRUMENT_CONFIG
-        else list(INSTRUMENT_CONFIG.keys())
-    )
+    # If type is explicitly given, search ONLY that table — no fallthrough.
+    # Fallthrough across instrument types is what caused stem collisions
+    # (e.g. 1107 present in both xbt and xctd tables).
+    if type and type.lower() in INSTRUMENT_CONFIG:
+        search_types = [type.lower()]
+    else:
+        # No type given: search all, but in a fixed priority order
+        search_types = ["ctd", "xbt", "xctd"]
 
     for instrument_type in search_types:
         cfg      = INSTRUMENT_CONFIG[instrument_type]
@@ -479,6 +482,7 @@ def get_profile(station_file: str, type: str = Query(None)):
             rows = []
 
         if rows:
+            print(f"FOUND PROFILE: stem={stem} table={table} type={instrument_type}")
             out_col_set = set(out_cols)
             return [
                 {
@@ -488,4 +492,8 @@ def get_profile(station_file: str, type: str = Query(None)):
                 for row in rows
             ]
 
-    raise HTTPException(status_code=404, detail=f"No profile found for: {stem}")
+    # Only reach here if type was explicit and stem wasn't found in that table
+    raise HTTPException(
+        status_code=404,
+        detail=f"No profile found for '{stem}' in instrument type '{type or 'any'}'"
+    )

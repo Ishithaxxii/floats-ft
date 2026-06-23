@@ -4,8 +4,9 @@ import {
     TileLayer,
     CircleMarker,
     Popup,
-    Polyline,
     Rectangle,
+    //GeoJSON,
+    Polyline,
     useMapEvents,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -30,11 +31,19 @@ const MARKER_COLORS = [
     "#795548", "#ffc107", "#673ab7", "#009688",
 ];
 
+// const EEZ_STYLE = {
+//     color: "#ffff00",
+//     weight: 2,
+//     opacity: 0.7,
+//     dashArray: "6 4",
+// };
+
 const EEZ_STYLE = {
     color: "#ffff00",
     weight: 2,
-    opacity: 0.7,
-    dashArray: "6 4",
+    opacity: 0.8,
+    fillColor: "#ffff00",
+    fillOpacity: 0.05,
 };
 
 const BOX_STYLE = {
@@ -63,32 +72,45 @@ function generateShipColorMap(stations) {
 function extractEEZLoops(geojson) {
     const points = geojson.features
         .filter(f => f.geometry?.type === "Point")
-        .map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+        .map(f => [
+            f.geometry.coordinates[1], // lat
+            f.geometry.coordinates[0], // lon
+        ]);
+
+    if (points.length === 0) return [];
 
     const loops = [];
-    let loop = [points[0]];
+    let currentLoop = [points[0]];
+
+    // Tune this if needed
+    const BREAK_THRESHOLD = 3.0;
 
     for (let i = 1; i < points.length; i++) {
-        const pt    = points[i];
-        const start = loop[0];
-        loop.push(pt);
+        const prev = points[i - 1];
+        const curr = points[i];
 
-        const closes =
-            Math.abs(pt[0] - start[0]) < 0.0001 &&
-            Math.abs(pt[1] - start[1]) < 0.0001;
+        const distance = Math.sqrt(
+            Math.pow(curr[0] - prev[0], 2) +
+            Math.pow(curr[1] - prev[1], 2)
+        );
 
-        if (closes && loop.length > 2) {
-            loops.push(loop);
-            if (i + 1 < points.length) {
-                loop = [points[i + 1]];
-                i++;
-            } else {
-                loop = [];
+        // Large jump => start a new segment
+        if (distance > BREAK_THRESHOLD) {
+            if (currentLoop.length > 1) {
+                loops.push(currentLoop);
             }
+            currentLoop = [curr];
+        } else {
+            currentLoop.push(curr);
         }
     }
 
-    if (loop.length > 1) loops.push(loop);
+    if (currentLoop.length > 1) {
+        loops.push(currentLoop);
+    }
+
+    console.log("EEZ segments:", loops.length);
+
     return loops;
 }
 
@@ -161,6 +183,7 @@ export default function MapView({
 }) {
     const [activeShip, setActiveShip] = useState("all");
     const [eezLoops,   setEezLoops]   = useState([]);
+    //const [eezData, setEezData] = useState(null);
     const [previewBox, setPreviewBox] = useState(null);
 
     useEffect(() => {
@@ -169,6 +192,14 @@ export default function MapView({
             .then(data => setEezLoops(extractEEZLoops(data)))
             .catch(err => console.error("Failed to load EEZ GeoJSON:", err));
     }, []);
+    // useEffect(() => {
+    // fetch("/data/india_eez_polygon.geojson")
+    //     .then(res => res.json())
+    //     .then(setEezData)
+    //     .catch(err =>
+    //         console.error("Failed to load EEZ polygon:", err)
+    //     );
+    // }, []);
 
     const shipColorMap = generateShipColorMap(stations);
     const ships        = Object.keys(shipColorMap);
@@ -206,9 +237,12 @@ export default function MapView({
 
                 {/* EEZ boundary loops */}
                 {eezLoops.map((loop, idx) => (
-                    <Polyline key={`eez-${idx}`} positions={loop} pathOptions={EEZ_STYLE} />
+                    <Polyline
+                        key={idx}
+                        positions={loop}
+                        pathOptions={EEZ_STYLE}
+                    />
                 ))}
-
                 {/* Committed spatial bounding box */}
                 {toPositions(spatialBounds) && (
                     <Rectangle bounds={toPositions(spatialBounds)} pathOptions={BOX_STYLE} />
@@ -244,6 +278,7 @@ export default function MapView({
                         >
                             <Popup>
                                 <div className="popup-content">
+                                    <p><b>Instrument Type :</b> {station.type}</p>
                                     <p><b>Ship:</b>     {station.ship}</p>
                                     <p><b>Cruise:</b>   {station.cruise}</p>
                                     <p><b>Station:</b>  {station.station}</p>

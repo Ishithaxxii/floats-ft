@@ -63,12 +63,12 @@ function DepthProfile({ data, config }) {
     const qcField = config.qcKey;
     
     const [selectedQC, setSelectedQC] = useState({
-        1: false,
-        2: false,
-        3: false,
-        4: false,
-        9: false,
-        all : false 
+        1: true,
+        2: true,
+        3: true,
+        4: true,
+        9: true,
+        all: true
     });
     // const sorted = [...data]
     // .filter(d => d[config.key] != null)
@@ -94,6 +94,36 @@ function DepthProfile({ data, config }) {
         <div className="profile-chart-card">
             <div className="qc-panel">
                 <h4> QC </h4>
+                <label
+                    className="qc-checkbox"
+                    style={{
+                        borderColor: "#aaa",
+                        fontWeight: "bold"
+                    }}
+                >
+                    <input
+                        type="checkbox"
+                        checked={selectedQC.all}
+                        onChange={() => {
+                            const newState = !selectedQC.all;
+                            setSelectedQC({
+                                1: newState,
+                                2: newState,
+                                3: newState,
+                                4: newState,
+                                9: newState,
+                                all: newState
+                            });
+                        }}
+                    />
+                    <span
+                        className="qc-color"
+                        style={{
+                            background: "#aaa"
+                        }}
+                    />
+                    All
+                </label>
                 {[1,2,3,4,9].map(qc => (
                     <label
                         key={qc}

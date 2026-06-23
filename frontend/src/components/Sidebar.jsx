@@ -5,44 +5,44 @@
 // ==========================================
 // STATION DETAILS
 // ==========================================
-function StationDetails({ station }) {
-    if (!station) {
-        return (
-            <div className="details-card empty">
-                <h3>Details</h3>
-                <p>Select a station marker to view metadata and open its vertical profile.</p>
-            </div>
-        );
-    }
+// function StationDetails({ station }) {
+//     if (!station) {
+//         return (
+//             <div className="details-card empty">
+//                 <h3>Details</h3>
+//                 <p>Select a station marker to view metadata and open its vertical profile.</p>
+//             </div>
+//         );
+//     }
 
-    const rows = [
-        ["Ship",     station.ship],
-        ["Cruise",   station.cruise],
-        ["Station",  station.station],
-        ["Datetime", station.datetime],
-        ["Depth",    station.depth],
-        ["Lat",      typeof station.latitude  === "number" ? station.latitude.toFixed(4)  : station.latitude],
-        ["Lon",      typeof station.longitude === "number" ? station.longitude.toFixed(4) : station.longitude],
-        ["Type",     station.type],
-        ["File",     station.file_name],
-    ];
+//     const rows = [
+//         ["Ship",     station.ship],
+//         ["Cruise",   station.cruise],
+//         ["Station",  station.station],
+//         ["Datetime", station.datetime],
+//         ["Depth",    station.depth],
+//         ["Lat",      typeof station.latitude  === "number" ? station.latitude.toFixed(4)  : station.latitude],
+//         ["Lon",      typeof station.longitude === "number" ? station.longitude.toFixed(4) : station.longitude],
+//         ["Type",     station.type],
+//         ["File",     station.file_name],
+//     ];
 
-    return (
-        <div className="details-card">
-            <h3>Station Details</h3>
-            <table className="details-table">
-                <tbody>
-                    {rows.map(([label, value]) => (
-                        <tr key={label}>
-                            <td className="detail-label">{label}</td>
-                            <td className="detail-value">{value ?? "N/A"}</td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
-    );
-}
+//     return (
+//         <div className="details-card">
+//             <h3>Station Details</h3>
+//             <table className="details-table">
+//                 <tbody>
+//                     {rows.map(([label, value]) => (
+//                         <tr key={label}>
+//                             <td className="detail-label">{label}</td>
+//                             <td className="detail-value">{value ?? "N/A"}</td>
+//                         </tr>
+//                     ))}
+//                 </tbody>
+//             </table>
+//         </div>
+//     );
+// }
 
 // ==========================================
 // TEMPORAL FILTER
@@ -213,7 +213,7 @@ function Sidebar({
                 {/* ---------------------------------- */}
                 {/* STATION DETAILS                    */}
                 {/* ---------------------------------- */}
-                <StationDetails station={selectedStation} />
+                {/* <StationDetails station={selectedStation} /> */}
 
             </div>
         </aside>
