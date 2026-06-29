@@ -9,6 +9,8 @@ import pandas as pd
 
 from meta_processor import infer_ship_from_metadata
 
+from datetime import date
+from typing import Optional
 
 # ==========================================
 # FASTAPI SETUP
@@ -529,18 +531,58 @@ class SpatialBox(BaseModel):
     latMax: float
     lonMin: float
     lonMax: float
+    dateFrom: Optional[str] = None   # "YYYY-MM-DD"
+    dateTo:   Optional[str] = None   # "YYYY-MM-DD"
     
-def _stations_in_box(box: SpatialBox):
+def _parse_date(raw: str | None):
+    """Parse YYYY-MM-DD, DD-MM-YYYY, MM/DD/YYYY to a date object. Returns None on failure."""
+    if not raw or raw == "N/A":
+        return None
+    import re
+    # YYYY-MM-DD
+    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', raw)
+    if m:
+        try: return date(int(m[1]), int(m[2]), int(m[3]))
+        except: return None
+    # DD-MM-YYYY
+    m = re.match(r'^(\d{2})-(\d{2})-(\d{4})', raw)
+    if m:
+        try: return date(int(m[3]), int(m[2]), int(m[1]))
+        except: return None
+    # MM/DD/YYYY
+    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})', raw)
+    if m:
+        try: return date(int(m[3]), int(m[1]), int(m[2]))
+        except: return None
+    return None
+
+
+def _stations_in_box(box: SpatialBox) -> list[dict]:
+    date_from = _parse_date(box.dateFrom)
+    date_to   = _parse_date(box.dateTo)
+
     stations = []
     for instrument_type in ["ctd", "xbt", "xctd"]:
-        # Only use already-cached data — don't block on loading
-        # If cache is empty, those stations simply won't appear in spatial results
         for station in _station_cache.get(instrument_type, []):
             lat = float(station["latitude"])
             lon = float(station["longitude"])
-            if (box.latMin <= lat <= box.latMax and
-                box.lonMin <= lon <= box.lonMax):
-                stations.append(station)
+
+            # Spatial check
+            if not (box.latMin <= lat <= box.latMax and
+                    box.lonMin <= lon <= box.lonMax):
+                continue
+
+            # Temporal check — skip station if its datetime is outside range
+            if date_from or date_to:
+                station_date = _parse_date(station.get("datetime", ""))
+                if station_date:
+                    if date_from and station_date < date_from:
+                        continue
+                    if date_to and station_date > date_to:
+                        continue
+
+            stations.append(station)
+
     return stations
 
 

@@ -143,7 +143,11 @@ function App() {
         fetch(`${API}/spatial-profile`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(spatialBounds),
+            body: JSON.stringify({
+                ...spatialBounds,
+                dateFrom: dateFrom || null,
+                dateTo:   dateTo   || null,
+            }),
         })
             .then(res => res.json())
             .then(data => {
@@ -157,7 +161,7 @@ function App() {
                 setSpatialLoading(false);
             });
 
-    }, [spatialBounds]);
+    }, [spatialBounds, dateFrom, dateTo]);
     return (
         <div className="app-container">
             <Navbar />
