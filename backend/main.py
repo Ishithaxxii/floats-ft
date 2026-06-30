@@ -340,11 +340,8 @@ def _build_cache(instrument_type: str, folder: str) -> None:
         )
 
         conn.execute(
-            f"""
-            CREATE INDEX IF NOT EXISTS
-            idx_{table}_stem
-            ON {table}(stem)
-            """
+            f"CREATE INDEX IF NOT EXISTS idx_{table}_stem_dep "
+            f"ON {table}(stem, depSM)"
         )
 
         count = conn.execute(
@@ -595,7 +592,6 @@ def _validate_type(instrument_type: str) -> None:
     if instrument_type not in INSTRUMENT_CONFIG:
         raise HTTPException(status_code=400, detail=f"Unknown instrument type: '{instrument_type}'")
 
-
 @app.post("/load-meta")
 def load_meta(type: str = Query("ctd")):
     instrument_type = type.lower()
@@ -664,6 +660,8 @@ def get_profile(station_file: str, type: str = Query(None)):
 
         try:
             with sqlite3.connect(CACHE_DB) as conn:
+                conn.execute("PRAGMA cache_size=-64000")   # 64MB page cache
+                conn.execute("PRAGMA temp_store=MEMORY")
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(query, (stem,)).fetchall()
         except sqlite3.OperationalError:
@@ -708,64 +706,44 @@ def get_spatial_profile(box: SpatialBox):
     }
 
     with sqlite3.connect(CACHE_DB) as conn:
+    conn.execute("PRAGMA cache_size=-64000")   # 64MB page cache
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.row_factory = sqlite3.Row
 
-        conn.row_factory = sqlite3.Row
+    for instrument_type in ["ctd", "xbt", "xctd"]:
+        type_stations = [s for s in selected_stations if s["type"] == instrument_type]
+        if not type_stations:
+            continue
 
-        for station in selected_stations:
+        cfg      = INSTRUMENT_CONFIG[instrument_type]
+        table    = cfg["table"]
+        out_cols = cfg["output_columns"]
+        out_col_set = set(out_cols)
 
-            instrument_type = station["type"]
+        stems = [
+            s["file_name"].strip().rsplit(".", 1)[0].lower()
+            for s in type_stations
+        ]
 
-            counts[instrument_type] += 1
+        # One query for all stems of this instrument type
+        placeholders = ",".join("?" * len(stems))
+        col_list     = ", ".join(f'"{c}"' for c in out_cols)
+        query = (
+            f'SELECT stem, {col_list} FROM {table} '
+            f'WHERE stem IN ({placeholders}) '
+            f'ORDER BY stem, depSM'
+        )
 
-            stem = (
-                station["file_name"]
-                .strip()
-                .rsplit(".", 1)[0]
-                .lower()
-            )
+        rows = conn.execute(query, stems).fetchall()
+        counts[instrument_type] = len(set(r["stem"] for r in rows))
 
-            cfg = INSTRUMENT_CONFIG[instrument_type]
-
-            table = cfg["table"]
-
-            out_cols = cfg["output_columns"]
-
-            col_list = ", ".join(
-                f'"{c}"'
-                for c in out_cols
-            )
-
-            query = (
-                f"SELECT {col_list} "
-                f"FROM {table} "
-                f"WHERE stem = ? "
-                f"ORDER BY depSM"
-            )
-
-            rows = conn.execute(
-                query,
-                (stem,)
-            ).fetchall()
-
-            out_col_set = set(out_cols)
-
-            for row in rows:
-
-                merged_rows.append(
-                    {
-                        **{
-                            col: (
-                                row[col]
-                                if col in out_col_set
-                                else None
-                            )
-                            for col in ALL_OUTPUT_COLUMNS
-                        },
-
-                        "instrument_type": instrument_type,
-                        "station_file": station["file_name"],
-                    }
-                )
+        for row in rows:
+            merged_rows.append({
+                **{col: (row[col] if col in out_col_set else None)
+                   for col in ALL_OUTPUT_COLUMNS},
+                "instrument_type": instrument_type,
+                "station_file":    row["stem"],
+            })
 
     return {
         "mode": "spatial",
@@ -780,3 +758,25 @@ def get_spatial_profile(box: SpatialBox):
 
         "data": merged_rows,
     }
+
+
+@app.on_event("startup")
+async def startup():
+    import threading
+    import asyncio
+
+    def _warm():
+        # Checkpoint WAL first so reads are fast
+        if os.path.isfile(CACHE_DB):
+            with sqlite3.connect(CACHE_DB) as conn:
+                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+
+        for t in ["ctd", "xbt", "xctd"]:
+            try:
+                ensure_cache(t)
+                load_meta(type=t)
+                print(f"[startup] {t} warmed up")
+            except Exception as e:
+                print(f"[startup] {t} failed: {e}")
+
+    threading.Thread(target=_warm, daemon=True).start()

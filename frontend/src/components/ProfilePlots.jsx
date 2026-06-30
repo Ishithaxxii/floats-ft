@@ -262,9 +262,8 @@ function ProfilePanel({
         ? (spatialData?.data || [])
         : (isCurrentProfile ? profileResult.data : []);
         
-    const availablePlots = PLOT_CONFIGS.filter(cfg =>
-        profileData.some(d => d[cfg.key] != null)
-    );
+    const availablePlots    = PLOT_CONFIGS.filter(cfg => profileData.some(d => d[cfg.key] != null));
+    const unavailablePlots  = PLOT_CONFIGS.filter(cfg => !profileData.some(d => d[cfg.key] != null));
 
     return (
         <div className="profile-overlay">
@@ -273,25 +272,28 @@ function ProfilePanel({
                     <div>
                         <h2 className="profile-title">Vertical Profiles</h2>
                         <p className="profile-subtitle">
-                            {isSpatial
-                                ? "Spatial Region Selection"
-                                : stationFile}
-
-                            {!isSpatial && stationType && (
-                                <span
-                                    style={{
-                                        marginLeft: "8px",
-                                        fontSize: "11px",
-                                        background: "#2a2a3e",
-                                        color: "#7ec8e3",
-                                        padding: "2px 7px",
-                                        borderRadius: "3px",
-                                        textTransform: "uppercase",
-                                        letterSpacing: "0.05em",
-                                    }}
-                                >
-                                    {stationType}
+                            {isSpatial ? (
+                                <span>Spatial Region — {spatialData?.station_count} stations across{" "}
+                                    {[
+                                        spatialData?.ctd_count  > 0 && "CTD",
+                                        spatialData?.xbt_count  > 0 && "XBT",
+                                        spatialData?.xctd_count > 0 && "XCTD",
+                                    ].filter(Boolean).join(", ")}
                                 </span>
+                            ) : (
+                                <>
+                                    {stationFile}
+                                    {stationType && (
+                                        <span style={{
+                                            marginLeft: "8px", fontSize: "11px",
+                                            background: "#2a2a3e", color: "#7ec8e3",
+                                            padding: "2px 7px", borderRadius: "3px",
+                                            textTransform: "uppercase", letterSpacing: "0.05em",
+                                        }}>
+                                            {stationType}
+                                        </span>
+                                    )}
+                                </>
                             )}
                         </p>
                     </div>
@@ -309,53 +311,24 @@ function ProfilePanel({
                 {/* Data */}
                 {!isLoading && !error && (
                     <>
-                        <div className="profile-ts-section">
-                            {isSpatial && spatialData && (
-                                <div
-                                    style={{
-                                        marginBottom: "15px",
-                                        padding: "10px",
-                                        background: "#1f2330",
-                                        borderRadius: "6px",
-                                        fontSize: "13px",
-                                        color: "#ddd",
-                                    }}
-                                >
-                                    <div>
-                                        Stations:
-                                        {" "}
-                                        {spatialData.station_count}
-                                    </div>
-
-                                    <div>
-                                        CTD:
-                                        {" "}
-                                        {spatialData.ctd_count}
-                                    </div>
-
-                                    <div>
-                                        XBT:
-                                        {" "}
-                                        {spatialData.xbt_count}
-                                    </div>
-
-                                    <div>
-                                        XCTD:
-                                        {" "}
-                                        {spatialData.xctd_count}
-                                    </div>
-
-                                    <div>
-                                        Observations:
-                                        {" "}
-                                        {spatialData.row_count}
-                                    </div>
-
-                                </div>
-
+                    <div className="profile-ts-section">
+                        {isSpatial && spatialData && (
+                            <div style={{
+                                marginBottom: "15px", padding: "10px",
+                                background: "#1f2330", borderRadius: "6px",
+                                fontSize: "13px", color: "#ddd",
+                                display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 16px",
+                            }}>
+                                <div>Stations: <b>{spatialData.station_count}</b></div>
+                                <div>Observations: <b>{spatialData.row_count?.toLocaleString()}</b></div>
+                                <div style={{ color: "#7ec8e3" }}>● CTD: {spatialData.ctd_count}</div>
+                                <div style={{ color: "#f39c12" }}>▲ XBT: {spatialData.xbt_count}</div>
+                                <div style={{ color: "#2ecc71" }}>◆ XCTD: {spatialData.xctd_count}</div>
+                            </div>
                             )}
                             <TSDiagram data={profileData} />
                         </div>
+
                         <div className="profile-charts-grid">
                             {availablePlots.length === 0
                                 ? <p className="profile-status">No plottable data found.</p>
@@ -364,6 +337,24 @@ function ProfilePanel({
                                 ))
                             }
                         </div>
+
+                        {/* Show which variables aren't available and why */}
+                        {unavailablePlots.length > 0 && (
+                            <div style={{
+                                padding: "10px 16px 16px",
+                                fontSize: "12px", color: "#555",
+                            }}>
+                                <span>Not available for this instrument: </span>
+                                {unavailablePlots.map(cfg => (
+                                    <span key={cfg.key} style={{
+                                        marginLeft: "6px", padding: "2px 6px",
+                                        background: "#1a1a2a", borderRadius: "3px", color: "#666",
+                                    }}>
+                                        {cfg.title.replace(" Profile", "")}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
                     </>
                 )}
             </div>

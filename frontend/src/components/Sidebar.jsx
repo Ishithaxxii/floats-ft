@@ -3,55 +3,6 @@
 // ==========================================
 
 // ==========================================
-// INSTRUMENT KEY (shape legend)
-// ==========================================
-function InstrumentKey() {
-    const items = [
-        {
-            type: "CTD",
-            shape: (
-                <svg width="14" height="14" viewBox="0 0 14 14">
-                    <circle cx="7" cy="7" r="5.5" fill="#7ec8e3" stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
-                </svg>
-            ),
-        },
-        {
-            type: "XBT",
-            shape: (
-                <svg width="14" height="14" viewBox="0 0 14 14">
-                    <polygon points="7,1.5 13,12.5 1,12.5" fill="#7ec8e3" stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
-                </svg>
-            ),
-        },
-        {
-            type: "XCTD",
-            shape: (
-                <svg width="14" height="14" viewBox="0 0 14 14">
-                    <polygon points="7,1 13,7 7,13 1,7" fill="#7ec8e3" stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
-                </svg>
-            ),
-        },
-    ];
-
-    return (
-        <section className="filter-card">
-            <h3>Instrument Types</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px" }}>
-                {items.map(({ type, shape }) => (
-                    <div key={type} style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", color: "#ccc" }}>
-                        {shape}
-                        <span>{type}</span>
-                    </div>
-                ))}
-            </div>
-            <p style={{ fontSize: "11px", color: "#666", marginTop: "8px", marginBottom: 0 }}>
-                Marker color indicates ship
-            </p>
-        </section>
-    );
-}
-
-// ==========================================
 // PER-TYPE LOADING INDICATORS
 // ==========================================
 function LoadingStatus({ loadingTypes, error }) {
@@ -112,7 +63,11 @@ function TemporalFilter({ dateFrom, dateTo, onDateFromChange, onDateToChange, on
 // ==========================================
 // SPATIAL BOUNDS DISPLAY
 // ==========================================
-function SpatialBounds({ bounds, onClear, spatialLoading, spatialProfileData, onViewSpatialProfile }) {
+function SpatialBounds({
+    bounds, onClear,
+    spatialLoading, spatialProfileData,
+    onViewSpatialProfile, onFetchSpatialProfile
+}) {
     if (!bounds) {
         return (
             <section className="filter-card">
@@ -139,7 +94,22 @@ function SpatialBounds({ bounds, onClear, spatialLoading, spatialProfileData, on
                 </tbody>
             </table>
 
-            {/* Loading indicator while spatial fetch is in progress */}
+            {/* Manual fetch trigger */}
+            {!spatialLoading && (
+                <button
+                    type="button"
+                    onClick={onFetchSpatialProfile}
+                    style={{
+                        marginTop: "10px", width: "100%", padding: "7px 0",
+                        background: "#2c5f2e", color: "#fff", border: "none",
+                        borderRadius: "5px", fontSize: "13px", cursor: "pointer",
+                    }}
+                >
+                    {spatialProfileData ? "↻ Reload Profiles" : "⬇ Load Profiles"}
+                </button>
+            )}
+
+            {/* Spinner while loading */}
             {spatialLoading && (
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", fontSize: "12px", color: "#aaa" }}>
                     <div style={{
@@ -147,29 +117,23 @@ function SpatialBounds({ bounds, onClear, spatialLoading, spatialProfileData, on
                         border: "2px solid #444", borderTop: "2px solid #3498db",
                         borderRadius: "50%", animation: "seasnap-spin 0.75s linear infinite",
                     }}/>
-                    Fetching profiles for this region… this may take a moment.
+                    Fetching profiles… this may take a moment.
                     <style>{`@keyframes seasnap-spin { to { transform: rotate(360deg); } }`}</style>
                 </div>
             )}
 
-            {/* Button to (re)open spatial profile panel once data is ready */}
+            {/* View button after data is ready */}
             {!spatialLoading && spatialProfileData && spatialProfileData.station_count > 0 && (
                 <button
                     type="button"
                     onClick={onViewSpatialProfile}
                     style={{
-                        marginTop:    "10px",
-                        width:        "100%",
-                        padding:      "7px 0",
-                        background:   "#1a6fa8",
-                        color:        "#fff",
-                        border:       "none",
-                        borderRadius: "5px",
-                        fontSize:     "13px",
-                        cursor:       "pointer",
+                        marginTop: "6px", width: "100%", padding: "7px 0",
+                        background: "#1a6fa8", color: "#fff", border: "none",
+                        borderRadius: "5px", fontSize: "13px", cursor: "pointer",
                     }}
                 >
-                    View Region Profiles ({spatialProfileData.station_count} stations,{" "}
+                    View Profiles ({spatialProfileData.station_count} stations,{" "}
                     {spatialProfileData.row_count?.toLocaleString()} obs)
                 </button>
             )}
@@ -179,6 +143,81 @@ function SpatialBounds({ bounds, onClear, spatialLoading, spatialProfileData, on
                     No stations found in this region.
                 </p>
             )}
+        </section>
+    );
+}
+// ==========================================
+// INSTRUMENT KEY TOGGLE
+// ==========================================
+function InstrumentKey({ activeInstruments, onToggle }) {
+    const items = [
+        {
+            type: "ctd",
+            label: "CTD",
+            shape: (
+                <svg width="14" height="14" viewBox="0 0 14 14">
+                    <circle cx="7" cy="7" r="5.5" fill="#7ec8e3" stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
+                </svg>
+            ),
+        },
+        {
+            type: "xbt",
+            label: "XBT",
+            shape: (
+                <svg width="14" height="14" viewBox="0 0 14 14">
+                    <polygon points="7,1.5 13,12.5 1,12.5" fill="#7ec8e3" stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
+                </svg>
+            ),
+        },
+        {
+            type: "xctd",
+            label: "XCTD",
+            shape: (
+                <svg width="14" height="14" viewBox="0 0 14 14">
+                    <polygon points="7,1 13,7 7,13 1,7" fill="#7ec8e3" stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
+                </svg>
+            ),
+        },
+    ];
+
+    return (
+        <section className="filter-card">
+            <h3>Instrument Types</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px" }}>
+                {items.map(({ type, label, shape }) => {
+                    const isActive = activeInstruments.includes(type);
+                    return (
+                        <div
+                            key={type}
+                            onClick={() => onToggle(type)}
+                            style={{
+                                display:       "flex",
+                                alignItems:    "center",
+                                gap:           "10px",
+                                fontSize:      "13px",
+                                color:         isActive ? "#fff" : "#555",
+                                cursor:        "pointer",
+                                padding:       "4px 6px",
+                                borderRadius:  "4px",
+                                background:    isActive ? "#1e3a50" : "transparent",
+                                border:        `1px solid ${isActive ? "#1a6fa8" : "transparent"}`,
+                                userSelect:    "none",
+                                transition:    "all 0.15s",
+                                opacity:       isActive ? 1 : 0.45,
+                            }}
+                        >
+                            {shape}
+                            <span>{label}</span>
+                            <span style={{ marginLeft: "auto", fontSize: "10px", color: "#666" }}>
+                                {isActive ? "●" : "○"}
+                            </span>
+                        </div>
+                    );
+                })}
+            </div>
+            <p style={{ fontSize: "11px", color: "#555", marginTop: "8px", marginBottom: 0 }}>
+                Click to show/hide · Marker color = ship
+            </p>
         </section>
     );
 }
@@ -206,6 +245,8 @@ function Sidebar({
     spatialLoading,
     spatialProfileData,
     onViewSpatialProfile,
+    activeInstruments,
+    onInstrumentToggle,
 }) {
     return (
         <aside className="dashboard-sidebar">
@@ -236,7 +277,10 @@ function Sidebar({
                 <LoadingStatus loadingTypes={loadingTypes} error={error} />
 
                 {/* INSTRUMENT KEY */}
-                <InstrumentKey />
+                <InstrumentKey
+                    activeInstruments={activeInstruments}
+                    onToggle={onInstrumentToggle}
+                />
 
                 {/* TEMPORAL FILTER */}
                 <TemporalFilter

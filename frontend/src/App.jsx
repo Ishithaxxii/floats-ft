@@ -95,6 +95,20 @@ function App() {
     );
     const queryLower = useMemo(() => query.trim().toLowerCase(), [query]);
 
+    const [activeInstruments, setActiveInstruments] = useState(["ctd", "xbt", "xctd"]);
+
+    // ----------------------------------------
+    // INSTRUMENT FILTERING TOGGLE
+    // ----------------------------------------
+    const handleInstrumentToggle = useCallback((type) => {
+        setActiveInstruments(prev => {
+            // Don't allow deselecting all — keep at least one active
+            if (prev.includes(type) && prev.length === 1) return prev;
+            return prev.includes(type)
+                ? prev.filter(t => t !== type)
+                : [...prev, type];
+        });
+    }, []);
     const filteredStations = useMemo(() => {
         const { latMin, latMax, lonMin, lonMax } = spatialBounds ?? {};
         const hasSpatial  = spatialBounds !== null;
@@ -102,14 +116,20 @@ function App() {
         const hasQuery    = queryLower.length > 0;
 
         return stations.filter(s => {
+            // 0. Instrument type toggle (cheapest — single Set lookup)
+            if (!activeInstruments.includes(s.type)) return false;
+
+            // 1. Spatial
             if (hasSpatial) {
                 if (s.latitude  < latMin || s.latitude  > latMax) return false;
                 if (s.longitude < lonMin || s.longitude > lonMax) return false;
             }
+            // 2. Temporal
             if (hasTemporal && s.datetime && s.datetime !== "N/A") {
                 const t = parseDateMs(s.datetime);
                 if (!isNaN(t) && (t < dateFromMs || t > dateToMs)) return false;
             }
+            // 3. Text
             if (hasQuery) {
                 return (
                     (s.ship      || "").toLowerCase().includes(queryLower) ||
@@ -120,7 +140,7 @@ function App() {
             }
             return true;
         });
-    }, [stations, spatialBounds, dateFromMs, dateToMs, queryLower]);
+    }, [stations, spatialBounds, dateFromMs, dateToMs, queryLower, activeInstruments]);
 
     const handleDateReset = useCallback(() => {
         setDateFrom(getTwoYearsAgo());
@@ -130,15 +150,11 @@ function App() {
     // ----------------------------------------
     // SPATIAL PROFILE — fires when box is committed
     // ----------------------------------------
-    useEffect(() => {
-        if (!spatialBounds) {
-            setSpatialProfileData(null);
-            setShowSpatialProfile(false);
-            setSpatialLoading(false);
-            return;
-        }
+    const fetchSpatialProfile = useCallback(() => {
+        if (!spatialBounds) return;
 
         setSpatialLoading(true);
+        setShowSpatialProfile(false);
 
         fetch(`${API}/spatial-profile`, {
             method: "POST",
@@ -160,8 +176,17 @@ function App() {
                 console.error("spatial-profile error:", err);
                 setSpatialLoading(false);
             });
-
     }, [spatialBounds, dateFrom, dateTo]);
+
+    // Only reset when box is cleared — no auto-fetch on draw
+    useEffect(() => {
+        if (!spatialBounds) {
+            setSpatialProfileData(null);
+            setShowSpatialProfile(false);
+            setSpatialLoading(false);
+        }
+    }, [spatialBounds]);
+
     return (
         <div className="app-container">
             <Navbar />
@@ -186,6 +211,9 @@ function App() {
                     spatialLoading={spatialLoading}
                     spatialProfileData={spatialProfileData}
                     onViewSpatialProfile={() => setShowSpatialProfile(true)}
+                    activeInstruments={activeInstruments}
+                    onInstrumentToggle={handleInstrumentToggle}
+                    onFetchSpatialProfile={fetchSpatialProfile}
                 />
                 <div className="map-container">
                     <MapView
