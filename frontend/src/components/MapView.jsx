@@ -12,6 +12,7 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import ProfilePlots from "./ProfilePlots";
 import Legend from "./Legend";
+import MarkerClusterGroup from "react-leaflet-cluster";
 
 // ==========================================
 // FIX DEFAULT MARKER ICON
@@ -51,33 +52,34 @@ const BOX_STYLE = {
 // INSTRUMENT SHAPE SVG ICONS
 // circle = CTD, triangle = XBT, diamond = XCTD
 // ==========================================
-function makeInstrumentIcon(instrumentType, color) {
-    const size = 14;
-    let shapeSvg;
+const iconCache = new Map();
 
+function makeInstrumentIcon(instrumentType, color) {
+    const key = `${instrumentType}-${color}`;
+    if (iconCache.has(key)) return iconCache.get(key);
+
+    const size = 10;
+    let shapeSvg;
     if (instrumentType === "ctd") {
-        // Filled circle
         shapeSvg = `<circle cx="7" cy="7" r="5.5" fill="${color}" stroke="rgba(0,0,0,0.45)" stroke-width="1"/>`;
     } else if (instrumentType === "xbt") {
-        // Upward triangle
         shapeSvg = `<polygon points="7,1.5 13,12.5 1,12.5" fill="${color}" stroke="rgba(0,0,0,0.45)" stroke-width="1"/>`;
     } else {
-        // Diamond (XCTD)
         shapeSvg = `<polygon points="7,1 13,7 7,13 1,7" fill="${color}" stroke="rgba(0,0,0,0.45)" stroke-width="1"/>`;
     }
 
-    const svg = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 14 14">
-            ${shapeSvg}
-        </svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 14 14">${shapeSvg}</svg>`;
 
-    return L.divIcon({
+    const icon = L.divIcon({
         html: svg,
-        className: "",          // suppress Leaflet's default white box
-        iconSize:   [size, size],
+        className: "",
+        iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
-        popupAnchor:[0, -size / 2],
+        popupAnchor: [0, -size / 2],
     });
+
+    iconCache.set(key, icon);
+    return icon;
 }
 
 // ==========================================
@@ -277,48 +279,50 @@ export default function MapView({
                 )}
 
                 {/* Station markers — shape by instrument, color by ship */}
-                {filteredStations.map((station, index) => {
-                    const lat = Number(station.latitude);
-                    const lon = Number(station.longitude);
-                    if (isNaN(lat) || isNaN(lon)) return null;
+                <>
+                    {filteredStations.map((station, index) => {
+                        const lat = Number(station.latitude);
+                        const lon = Number(station.longitude);
+                        if (isNaN(lat) || isNaN(lon)) return null;
 
-                    const color      = shipColorMap[station.ship] || "#3498db";
-                    const icon       = makeInstrumentIcon(station.type, color);
-                    const hasProfile = (
-                        station.file_name &&
-                        !["n/a", "nan"].includes(station.file_name.trim().toLowerCase())
-                    );
+                        const color      = shipColorMap[station.ship] || "#3498db";
+                        const icon       = makeInstrumentIcon(station.type, color);
+                        const hasProfile = (
+                            station.file_name &&
+                            !["n/a", "nan"].includes(station.file_name.trim().toLowerCase())
+                        );
 
-                    return (
-                        <Marker
-                            key={`${station.type}-${index}`}
-                            position={[lat, lon]}
-                            icon={icon}
-                            eventHandlers={{ click: () => onSelectStation(station) }}
-                        >
-                            <Popup>
-                                <div className="popup-content">
-                                    <p><b>Instrument:</b> {station.type?.toUpperCase()}</p>
-                                    <p><b>Ship:</b>       {station.ship}</p>
-                                    <p><b>Cruise:</b>     {station.cruise}</p>
-                                    <p><b>Station:</b>    {station.station}</p>
-                                    <p><b>Datetime:</b>   {station.datetime}</p>
-                                    <p><b>Depth:</b>      {station.depth}</p>
-                                    <p><b>Lat:</b>        {lat.toFixed(4)}</p>
-                                    <p><b>Lon:</b>        {lon.toFixed(4)}</p>
-                                    <button
-                                        className="popup-profile-btn"
-                                        type="button"
-                                        onClick={() => handleOpenProfile(station)}
-                                        disabled={!hasProfile}
-                                    >
-                                        View Profile
-                                    </button>
-                                </div>
-                            </Popup>
-                        </Marker>
-                    );
-                })}
+                        return (
+                            <Marker
+                                key={`${station.type}-${index}`}
+                                position={[lat, lon]}
+                                icon={icon}
+                                eventHandlers={{ click: () => onSelectStation(station) }}
+                            >
+                                <Popup>
+                                    <div className="popup-content">
+                                        <p><b>Instrument:</b> {station.type?.toUpperCase()}</p>
+                                        <p><b>Ship:</b>       {station.ship}</p>
+                                        <p><b>Cruise:</b>     {station.cruise}</p>
+                                        <p><b>Station:</b>    {station.station}</p>
+                                        <p><b>Datetime:</b>   {station.datetime}</p>
+                                        <p><b>Depth:</b>      {station.depth}</p>
+                                        <p><b>Lat:</b>        {lat.toFixed(4)}</p>
+                                        <p><b>Lon:</b>        {lon.toFixed(4)}</p>
+                                        <button
+                                            className="popup-profile-btn"
+                                            type="button"
+                                            onClick={() => handleOpenProfile(station)}
+                                            disabled={!hasProfile}
+                                        >
+                                            View Profile
+                                        </button>
+                                    </div>
+                                </Popup>
+                            </Marker>
+                        );
+                    })}
+                </>
             </MapContainer>
 
             {/* Shift+drag hint — bottom-center of map, hides after box drawn */}

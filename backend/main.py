@@ -698,85 +698,74 @@ def get_spatial_profile(box: SpatialBox):
         }
 
     merged_rows = []
-
-    counts = {
-        "ctd": 0,
-        "xbt": 0,
-        "xctd": 0,
-    }
+    counts = {"ctd": 0, "xbt": 0, "xctd": 0}
 
     with sqlite3.connect(CACHE_DB) as conn:
-    conn.execute("PRAGMA cache_size=-64000")   # 64MB page cache
-    conn.execute("PRAGMA temp_store=MEMORY")
-    conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA cache_size=-64000")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.row_factory = sqlite3.Row
 
-    for instrument_type in ["ctd", "xbt", "xctd"]:
-        type_stations = [s for s in selected_stations if s["type"] == instrument_type]
-        if not type_stations:
-            continue
+        for instrument_type in ["ctd", "xbt", "xctd"]:
+            type_stations = [s for s in selected_stations if s["type"] == instrument_type]
+            if not type_stations:
+                continue
 
-        cfg      = INSTRUMENT_CONFIG[instrument_type]
-        table    = cfg["table"]
-        out_cols = cfg["output_columns"]
-        out_col_set = set(out_cols)
+            cfg      = INSTRUMENT_CONFIG[instrument_type]
+            table    = cfg["table"]
+            out_cols = cfg["output_columns"]
+            out_col_set = set(out_cols)
 
-        stems = [
-            s["file_name"].strip().rsplit(".", 1)[0].lower()
-            for s in type_stations
-        ]
+            stems = [
+                s["file_name"].strip().rsplit(".", 1)[0].lower()
+                for s in type_stations
+            ]
 
-        # One query for all stems of this instrument type
-        placeholders = ",".join("?" * len(stems))
-        col_list     = ", ".join(f'"{c}"' for c in out_cols)
-        query = (
-            f'SELECT stem, {col_list} FROM {table} '
-            f'WHERE stem IN ({placeholders}) '
-            f'ORDER BY stem, depSM'
-        )
+            placeholders = ",".join("?" * len(stems))
+            col_list     = ", ".join(f'"{c}"' for c in out_cols)
+            query = (
+                f'SELECT stem, {col_list} FROM {table} '
+                f'WHERE stem IN ({placeholders}) '
+                f'ORDER BY stem, depSM'
+            )
 
-        rows = conn.execute(query, stems).fetchall()
-        counts[instrument_type] = len(set(r["stem"] for r in rows))
+            rows = conn.execute(query, stems).fetchall()
+            counts[instrument_type] = len(set(r["stem"] for r in rows))
 
-        for row in rows:
-            merged_rows.append({
-                **{col: (row[col] if col in out_col_set else None)
-                   for col in ALL_OUTPUT_COLUMNS},
-                "instrument_type": instrument_type,
-                "station_file":    row["stem"],
-            })
+            for row in rows:
+                merged_rows.append({
+                    **{col: (row[col] if col in out_col_set else None)
+                       for col in ALL_OUTPUT_COLUMNS},
+                    "instrument_type": instrument_type,
+                    "station_file":    row["stem"],
+                })
 
     return {
         "mode": "spatial",
-
         "station_count": len(selected_stations),
-
         "ctd_count": counts["ctd"],
         "xbt_count": counts["xbt"],
         "xctd_count": counts["xctd"],
-
         "row_count": len(merged_rows),
-
         "data": merged_rows,
     }
 
+# @app.on_event("startup")
+# async def startup():
+#     import threading
+#     import asyncio
 
-@app.on_event("startup")
-async def startup():
-    import threading
-    import asyncio
+#     def _warm():
+#         # Checkpoint WAL first so reads are fast
+#         if os.path.isfile(CACHE_DB):
+#             with sqlite3.connect(CACHE_DB) as conn:
+#                 conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
 
-    def _warm():
-        # Checkpoint WAL first so reads are fast
-        if os.path.isfile(CACHE_DB):
-            with sqlite3.connect(CACHE_DB) as conn:
-                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+#         for t in ["ctd", "xbt", "xctd"]:
+#             try:
+#                 ensure_cache(t)
+#                 load_meta(type=t)
+#                 print(f"[startup] {t} warmed up")
+#             except Exception as e:
+#                 print(f"[startup] {t} failed: {e}")
 
-        for t in ["ctd", "xbt", "xctd"]:
-            try:
-                ensure_cache(t)
-                load_meta(type=t)
-                print(f"[startup] {t} warmed up")
-            except Exception as e:
-                print(f"[startup] {t} failed: {e}")
-
-    threading.Thread(target=_warm, daemon=True).start()
+#     threading.Thread(target=_warm, daemon=True).start()

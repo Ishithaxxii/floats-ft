@@ -41,7 +41,7 @@ function LoadingStatus({ loadingTypes, error }) {
 // ==========================================
 // TEMPORAL FILTER
 // ==========================================
-function TemporalFilter({ dateFrom, dateTo, onDateFromChange, onDateToChange, onReset }) {
+function TemporalFilter({ dateFrom, dateTo, onDateFromChange, onDateToChange, onReset, onApply }) {
     return (
         <section className="filter-card">
             <div className="filter-header">
@@ -56,6 +56,17 @@ function TemporalFilter({ dateFrom, dateTo, onDateFromChange, onDateToChange, on
                 <span>To</span>
                 <input type="date" value={dateTo} onChange={(e) => onDateToChange(e.target.value)} />
             </label>
+            <button
+                type="button"
+                onClick={onApply}
+                style={{
+                    marginTop: "8px", width: "100%", padding: "6px 0",
+                    background: "#1a6fa8", color: "#fff", border: "none",
+                    borderRadius: "5px", fontSize: "13px", cursor: "pointer",
+                }}
+            >
+                Go
+            </button>
         </section>
     );
 }
@@ -239,6 +250,7 @@ function Sidebar({
     onDateFromChange,
     onDateToChange,
     onDateReset,
+    onApplyDateFilter,
     spatialBounds,
     onSpatialClear,
     loadingTypes,
@@ -247,13 +259,13 @@ function Sidebar({
     onViewSpatialProfile,
     activeInstruments,
     onInstrumentToggle,
+    onFetchSpatialProfile,   // ← add this
 }) {
     return (
         <aside className="dashboard-sidebar">
             <div className="sidebar-panel">
 
                 <h2>SeaSnap</h2>
-
                 {/* SEARCH */}
                 <section className="search-card">
                     <label>
@@ -289,6 +301,7 @@ function Sidebar({
                     onDateFromChange={onDateFromChange}
                     onDateToChange={onDateToChange}
                     onReset={onDateReset}
+                    onApply={onApplyDateFilter}
                 />
 
                 {/* SPATIAL FILTER */}
@@ -298,6 +311,7 @@ function Sidebar({
                     spatialLoading={spatialLoading}
                     spatialProfileData={spatialProfileData}
                     onViewSpatialProfile={onViewSpatialProfile}
+                    onFetchSpatialProfile={onFetchSpatialProfile} 
                 />
 
             </div>

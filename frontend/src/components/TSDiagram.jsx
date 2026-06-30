@@ -1,4 +1,6 @@
-import Plot from "react-plotly.js";
+import Plotly from "plotly.js-dist-min";
+import createPlotlyComponent from "react-plotly.js/factory";
+const Plot = createPlotlyComponent(Plotly);
 
 const QC_COLORS = {
     1: "#2ecc71", 2: "#f1c40f", 3: "#ff8c00", 4: "#e74c3c", 9: "#95a5a6",

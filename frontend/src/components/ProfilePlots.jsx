@@ -15,6 +15,7 @@ const PLOT_CONFIGS = [
     { key: "c0S/m",                           label: "Conductivity (S/m)",      color: "#2ecc71", title: "Conductivity Profile"      },
     { key: "sbeox0ML/L",                      label: "Dissolved Oxygen (mL/L)", color: "#f39c12", title: "Dissolved Oxygen Profile"  },
     { key: "sigma-t00",                       label: "Density (kg/m³)",         color: "#9b59b6", title: "Density Profile"           },
+    { key: "SoundVelocity (m/s)",             label: "SoundVelocity (m/s)",     color: "#1abc9c", title: "Sound Velocity Profile"},
 ];
 
 const QC_COLORS = { 1: "#2ecc71", 2: "#f1c40f", 3: "#e67e22", 4: "#e74c3c", 9: "#95a5a6" };

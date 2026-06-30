@@ -142,12 +142,24 @@ function App() {
         });
     }, [stations, spatialBounds, dateFromMs, dateToMs, queryLower, activeInstruments]);
 
+    
+    const [pendingDateFrom, setPendingDateFrom] = useState(getTwoYearsAgo);
+    const [pendingDateTo,   setPendingDateTo]   = useState(TODAY);
+
+    const applyDateFilter = useCallback(() => {
+        setDateFrom(pendingDateFrom);
+        setDateTo(pendingDateTo);
+    }, [pendingDateFrom, pendingDateTo]);
+
     const handleDateReset = useCallback(() => {
-        setDateFrom(getTwoYearsAgo());
+        const from = getTwoYearsAgo();
+        setPendingDateFrom(from);
+        setPendingDateTo(TODAY);
+        setDateFrom(from);
         setDateTo(TODAY);
     }, []);
 
-    // ----------------------------------------
+    // ------------------------
     // SPATIAL PROFILE — fires when box is committed
     // ----------------------------------------
     const fetchSpatialProfile = useCallback(() => {
@@ -214,6 +226,12 @@ function App() {
                     activeInstruments={activeInstruments}
                     onInstrumentToggle={handleInstrumentToggle}
                     onFetchSpatialProfile={fetchSpatialProfile}
+                    dateFrom={pendingDateFrom}
+                    dateTo={pendingDateTo}
+                    onDateFromChange={setPendingDateFrom}
+                    onDateToChange={setPendingDateTo}
+                    onDateReset={handleDateReset}
+                    onApplyDateFilter={applyDateFilter}
                 />
                 <div className="map-container">
                     <MapView
