@@ -151,7 +151,7 @@ function DepthProfile({ data, config }) {
                         <Label value={config.label} position="insideBottom" offset={-15} fill="#aaa" fontSize={16} />
                     </XAxis>
                     <YAxis
-                        type="number" dataKey="depSM" domain={[0, maxDepth]} reversed
+                        type="number" dataKey="depSM" domain={[maxDepth, 0]} //reversed
                         ticks={yTicks} stroke="#aaa" tick={{ fill: "#aaa", fontSize: 14 }}
                         width={75} padding={{ top: 10, bottom: 10 }}
                     >
