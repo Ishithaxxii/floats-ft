@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import "./App.css";
-import Navbar from "./components/Navbar";
-import Sidebar from "./components/Sidebar";
-import MapView from "./components/MapView";
+import MapView, { Navbar, Sidebar } from "./components/MapView";
 
 const API = "http://localhost:8000";
 const INSTRUMENT_TYPES = ["ctd", "xbt", "xctd"];
