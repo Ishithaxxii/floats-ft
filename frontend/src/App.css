@@ -24,12 +24,15 @@ html, body, #root {
     flex-direction: column;
     height: 100%;
     width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
 }
 
 .main-layout {
     display: flex;
     flex: 1;
     overflow: hidden;
+    min-width: 0;
 }
 
 /* ==========================================
@@ -61,18 +64,22 @@ html, body, #root {
 }
 
 /* ==========================================
-   SIDEBAR
+   SIDEBAR (legacy .sidebar block — kept for
+   any older markup that still references it)
    ========================================== */
 .sidebar {
-    width: 220px;
+    width: 340px;
+    max-width: 100%;
     flex-shrink: 0;
     background-color: #13131f;
     border-right: 1px solid #2a2a3e;
     padding: 16px 12px;
     overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
     gap: 20px;
+    min-width: 0;
 }
 
 .sidebar-heading {
@@ -128,6 +135,7 @@ html, body, #root {
     height: 100%;
     position: relative;
     overflow: hidden;
+    min-width: 0;
 }
 
 /* ==========================================
@@ -143,8 +151,10 @@ html, body, #root {
     border-radius: 8px;
     padding: 12px;
     min-width: 160px;
+    max-width: min(220px, calc(100vw - 24px));
     max-height: 60vh;
     overflow-y: auto;
+    overflow-x: hidden;
     backdrop-filter: blur(6px);
 }
 
@@ -166,6 +176,7 @@ html, body, #root {
     color: #ccc;
     border-radius: 4px;
     transition: opacity 0.2s;
+    min-width: 0;
 }
 
 .legend-item:hover {
@@ -253,6 +264,7 @@ html, body, #root {
     max-width: 1800px;
     max-height: 88vh;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 24px;
     display: flex;
     flex-direction: column;
@@ -345,6 +357,7 @@ html, body, #root {
 } */
 .profile-chart-card {
     position: relative;
+    min-width: 0;
 }
 .qc-panel {
     position: absolute;
@@ -406,6 +419,9 @@ html, body, #root {
     cursor: pointer;
     transition: all 0.2s;
     text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .legend-filter.active,
@@ -419,6 +435,7 @@ html, body, #root {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    min-width: 0;
 }
 
 .legend-item {
@@ -435,6 +452,7 @@ html, body, #root {
     text-align: left;
     transition: all 0.2s;
     width: 100%;
+    min-width: 0;
 }
 
 .legend-item span {
@@ -443,6 +461,16 @@ html, body, #root {
     border-radius: 50%;
     flex-shrink: 0;
     display: inline-block;
+}
+
+/* Text label inside legend/instrument rows (the non-swatch span) should
+   truncate instead of forcing the row wider than its container. */
+.legend-item span:last-child {
+    width: auto;
+    border-radius: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .legend-item.active,
@@ -456,11 +484,16 @@ html, body, #root {
    SIDEBAR (new structure)
    ========================================== */
 .dashboard-sidebar {
-    width: 240px;
+    width: 340px;
+    max-width: 100%;
     flex-shrink: 0;
     background-color: #13131f;
     border-right: 1px solid #2a2a3e;
     overflow-y: auto;
+    overflow-x: hidden; /* prevents overflow-y:auto from implicitly
+                            enabling horizontal scroll (CSS spec behavior)
+                            which was clipping the sidebar contents */
+    min-width: 0;
 }
 
 .sidebar-panel {
@@ -468,6 +501,8 @@ html, body, #root {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .sidebar-panel h2 {
@@ -488,12 +523,15 @@ html, body, #root {
     border: 1px solid #2a2a3e;
     border-radius: 8px;
     padding: 12px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .search-card label {
     display: flex;
     flex-direction: column;
     gap: 5px;
+    min-width: 0;
 }
 
 .search-card label span {
@@ -513,6 +551,9 @@ html, body, #root {
     font-size: 12px;
     outline: none;
     transition: border-color 0.2s;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .search-card input:focus {
@@ -575,6 +616,125 @@ html, body, #root {
 }
 
 /* ---------------------------------- */
+/* FILTER CARD (Time Range / Spatial Filter) */
+/* ---------------------------------- */
+.filter-card {
+    background: #1e1e30;
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.filter-card.active-bounds {
+    border-color: #4fc3f7;
+}
+
+.filter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.filter-card h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #4fc3f7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.reset-btn {
+    padding: 4px 8px;
+    background: #2a2a40;
+    border: 1px solid #3a3a5e;
+    border-radius: 5px;
+    color: #aaa;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.reset-btn:hover:not(:disabled) {
+    background: #3a3a5e;
+    color: #fff;
+}
+
+.reset-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.filter-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.filter-label span {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #888;
+}
+
+.filter-label input {
+    background: #0f0f1a;
+    border: 1px solid #2a2a3e;
+    border-radius: 5px;
+    color: #eee;
+    padding: 6px 8px;
+    font-size: 12px;
+    outline: none;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    transition: border-color 0.2s;
+}
+
+.filter-label input:focus {
+    border-color: #4fc3f7;
+}
+
+.hint-text {
+    font-size: 11px;
+    color: #777;
+    line-height: 1.5;
+}
+
+/* Lat/Lon manual-entry 2-column grid (inline-styled in JSX via
+   gridTemplateColumns) — grid children default to min-width:auto,
+   which refuses to shrink below content size and was a major
+   contributor to the sidebar overflow. Force them to respect the
+   parent's width instead. */
+.filter-card > div[style*="grid-template-columns"] {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.filter-card > div[style*="grid-template-columns"] > label {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.filter-card > div[style*="grid-template-columns"] input {
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* ---------------------------------- */
 /* DETAILS CARD                       */
 /* ---------------------------------- */
 .details-card {
@@ -585,6 +745,8 @@ html, body, #root {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .details-card h3 {
@@ -612,6 +774,7 @@ html, body, #root {
     justify-content: space-between;
     align-items: baseline;
     gap: 8px;
+    min-width: 0;
 }
 
 .details-card dt {
@@ -625,6 +788,7 @@ html, body, #root {
     color: #ddd;
     text-align: right;
     word-break: break-all;
+    min-width: 0;
 }
 
 .details-card button {
@@ -698,3 +862,55 @@ html, body, #root {
     font-weight: 700;
     text-align: right;
 }
+
+.grid-number {
+    background: transparent !important;
+    border: none !important;
+}
+
+.grid-number span {
+    color: white;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: monospace;
+    text-shadow:
+        0 0 4px #000,
+        0 0 4px #000,
+        0 0 6px #000,
+        1px 1px 3px #000;
+    pointer-events: none;
+}
+
+/* ==========================================
+   RESPONSIVE — narrow / mobile viewports
+   Stacks the sidebar above the map instead of
+   squeezing both into a too-narrow row, which
+   is what was clipping the sidebar in the
+   screenshot (240px sidebar on a viewport
+   narrower than 240px + map minimum width).
+   ========================================== */
+@media (max-width: 900px) {
+    .main-layout {
+        flex-direction: column;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    .dashboard-sidebar,
+    .sidebar {
+        width: 100%;
+        max-width: 100%;
+        max-height: 45vh;
+        border-right: none;
+        border-bottom: 1px solid #2a2a3e;
+    }
+
+    .map-container {
+        width: 100%;
+        min-height: 45vh;
+    }
+
+    .map-legend {
+        max-width: calc(100vw - 24px);
+    }
+}git 

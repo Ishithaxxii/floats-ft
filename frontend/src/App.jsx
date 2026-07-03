@@ -210,13 +210,15 @@ function App() {
                     error={errorMsg}
                     onRefresh={() => INSTRUMENT_TYPES.forEach(t => loadType(t))}
                     selectedStation={selectedStation}
-                    dateFrom={dateFrom}
-                    dateTo={dateTo}
-                    onDateFromChange={setDateFrom}
-                    onDateToChange={setDateTo}
+                    dateFrom={pendingDateFrom}
+                    dateTo={pendingDateTo}
+                    onDateFromChange={setPendingDateFrom}
+                    onDateToChange={setPendingDateTo}
                     onDateReset={handleDateReset}
+                    onApplyDateFilter={applyDateFilter}
                     spatialBounds={spatialBounds}
                     onSpatialClear={() => setSpatialBounds(null)}
+                    onApplyBounds={setSpatialBounds}
                     loadingTypes={loadingTypes}
                     spatialLoading={spatialLoading}
                     spatialProfileData={spatialProfileData}
@@ -224,12 +226,6 @@ function App() {
                     activeInstruments={activeInstruments}
                     onInstrumentToggle={handleInstrumentToggle}
                     onFetchSpatialProfile={fetchSpatialProfile}
-                    dateFrom={pendingDateFrom}
-                    dateTo={pendingDateTo}
-                    onDateFromChange={setPendingDateFrom}
-                    onDateToChange={setPendingDateTo}
-                    onDateReset={handleDateReset}
-                    onApplyDateFilter={applyDateFilter}
                 />
                 <div className="map-container">
                     <MapView

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, Component } from "react";
+import { useState, useEffect, useRef, useCallback, Component, useMemo } from "react";
 import {
     MapContainer,
     TileLayer,
@@ -318,6 +318,7 @@ function InstrumentKey({ activeInstruments, onToggle }) {
 // ==========================================
 // SIDEBAR
 // ==========================================
+// ==========================================
 export function Sidebar({
     stationCount,
     filteredCount,
@@ -341,15 +342,14 @@ export function Sidebar({
     onViewSpatialProfile,
     activeInstruments,
     onInstrumentToggle,
-    onFetchSpatialProfile,   // ← add this
+    onFetchSpatialProfile,
     onApplyBounds,
 }) {
     return (
         <aside className="dashboard-sidebar">
             <div className="sidebar-panel">
+                <h2>OceanGrid</h2>
 
-                <h2>SeaSnap</h2>
-                {/* SEARCH */}
                 <section className="search-card">
                     <label>
                         <span>Search stations</span>
@@ -368,16 +368,8 @@ export function Sidebar({
                     </button>
                 </section>
 
-                {/* PER-TYPE LOADING + ERROR */}
                 <LoadingStatus loadingTypes={loadingTypes} error={error} />
 
-                {/* INSTRUMENT KEY */}
-                <InstrumentKey
-                    activeInstruments={activeInstruments}
-                    onToggle={onInstrumentToggle}
-                />
-
-                {/* TEMPORAL FILTER */}
                 <TemporalFilter
                     dateFrom={dateFrom}
                     dateTo={dateTo}
@@ -387,7 +379,6 @@ export function Sidebar({
                     onApply={onApplyDateFilter}
                 />
 
-                {/* SPATIAL FILTER */}
                 <SpatialBounds
                     bounds={spatialBounds}
                     onClear={onSpatialClear}
@@ -398,11 +389,14 @@ export function Sidebar({
                     onApplyBounds={onApplyBounds}
                 />
 
+                <InstrumentKey
+                    activeInstruments={activeInstruments}
+                    onToggle={onInstrumentToggle}
+                />
             </div>
         </aside>
     );
 }
-
 
 function Legend({ activeShip, shipColorMap, ships, onSelectShip, drawMode, onToggleDraw }) {
     return (
@@ -1279,6 +1273,55 @@ function extractEEZLoops(geojson) {
 }
 
 // ==========================================
+// POINT-IN-EEZ CHECK (ray casting)
+// ==========================================
+function rayCastPointInPolygon(lat, lon, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const yi = polygon[i][0], xi = polygon[i][1];
+        const yj = polygon[j][0], xj = polygon[j][1];
+        const intersect =
+            (yi > lat) !== (yj > lat) &&
+            lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+function isPointInEEZ(lat, lon, loops) {
+    return loops.some(loop => rayCastPointInPolygon(lat, lon, loop));
+}
+
+// ==========================================
+// CSV HELPERS
+// ==========================================
+function jsonToCSV(rows) {
+    if (!rows || rows.length === 0) return "";
+    const headers = Object.keys(rows[0]);
+    const escape = (val) => {
+        if (val == null) return "";
+        const str = String(val);
+        return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+    const lines = [headers.join(",")];
+    rows.forEach(row => lines.push(headers.map(h => escape(row[h])).join(",")));
+    return lines.join("\n");
+}
+
+function triggerCSVDownload(filename, csvString) {
+    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+
+// ==========================================
 // BOX SELECT HANDLER (Shift + drag)
 // ==========================================
 function BoxSelectHandler({ onBoundsChange, drawMode = false }) {
@@ -1347,6 +1390,107 @@ function ShiftDragHint({ spatialBounds }) {
             userSelect:   "none",
         }}>
             ⇧ Shift + drag to select a region
+        </div>
+    );
+}
+
+
+const REQUISITION_FORM_URL = "https://incois.gov.in/CHANGE_ME/data-requisition"; // ← update with real link
+
+function MarkerPopupContent({ station, lat, lon, hasProfile, eezLoops, onOpenProfile }) {
+    const insideEEZ = useMemo(
+        () => isPointInEEZ(lat, lon, eezLoops),
+        [lat, lon, eezLoops]
+    );
+
+    const [csvState, setCsvState] = useState({
+        loading: false, error: null, showRequisition: false,
+    });
+
+    const handleDownloadClick = async () => {
+        if (insideEEZ) {
+            setCsvState({ loading: false, error: null, showRequisition: true });
+            return;
+        }
+        setCsvState({ loading: true, error: null, showRequisition: false });
+        try {
+            const typeParam = station.type ? `&type=${station.type}` : "";
+            const url = `${API}/profile/${encodeURIComponent(station.file_name)}?_=${Date.now()}${typeParam}`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const rows = Array.isArray(data) ? data : [];
+            if (rows.length === 0) throw new Error("No data available for this marker.");
+
+            const csv = jsonToCSV(rows);
+            const safeName = (station.file_name)
+            //const safeName = (station.station || station.file_name || "station")
+                .replace(/[^a-z0-9_-]/gi, "_");
+            triggerCSVDownload(`${safeName}_${station.type || "data"}.csv`, csv);
+
+            setCsvState({ loading: false, error: null, showRequisition: false });
+        } catch (err) {
+            setCsvState({ loading: false, error: err.message, showRequisition: false });
+        }
+    };
+
+    return (
+        <div className="popup-content">
+            <p><b>Instrument:</b> {station.type?.toUpperCase()}</p>
+            <p><b>Ship:</b>       {station.ship}</p>
+            <p><b>Cruise:</b>     {station.cruise}</p>
+            <p><b>Station:</b>    {station.station}</p>
+            <p><b>Datetime:</b>   {station.datetime}</p>
+            <p><b>Depth:</b>      {station.depth}</p>
+            <p><b>Lat:</b>        {lat.toFixed(4)}</p>
+            <p><b>Lon:</b>        {lon.toFixed(4)}</p>
+
+            <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
+                <button
+                    className="popup-profile-btn"
+                    type="button"
+                    onClick={onOpenProfile}
+                    disabled={!hasProfile}
+                >
+                    View Profile
+                </button>
+
+                <button
+                    className="popup-csv-btn"
+                    type="button"
+                    onClick={handleDownloadClick}
+                    disabled={csvState.loading || !hasProfile}
+                    title={insideEEZ ? "Inside EEZ — requisition required" : "Download this marker's data"}
+                >
+                    {csvState.loading ? "Preparing…" : "⬇ Download CSV"}
+                </button>
+            </div>
+
+            {csvState.error && (
+                <p style={{ color: "#e74c3c", fontSize: "11px", marginTop: "6px" }}>
+                    {csvState.error}
+                </p>
+            )}
+
+            {csvState.showRequisition && (
+                <div style={{
+                    marginTop: "8px", padding: "8px", background: "#1f2330",
+                    borderRadius: "5px", fontSize: "12px", color: "#ddd",
+                }}>
+                    <p style={{ margin: "0 0 6px" }}>
+                        This marker lies inside the Indian EEZ. Please submit a data
+                        requisition form to obtain this CSV.
+                    </p>
+                    <a
+                        href={REQUISITION_FORM_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: "#3498db", fontWeight: "bold" }}
+                    >
+                        Open Requisition Form →
+                    </a>
+                </div>
+            )}
         </div>
     );
 }
@@ -1469,24 +1613,15 @@ export default function MapView({
                                 eventHandlers={{ click: () => onSelectStation(station) }}
                             >
                                 <Popup>
-                                    <div className="popup-content">
-                                        <p><b>Instrument:</b> {station.type?.toUpperCase()}</p>
-                                        <p><b>Ship:</b>       {station.ship}</p>
-                                        <p><b>Cruise:</b>     {station.cruise}</p>
-                                        <p><b>Station:</b>    {station.station}</p>
-                                        <p><b>Datetime:</b>   {station.datetime}</p>
-                                        <p><b>Depth:</b>      {station.depth}</p>
-                                        <p><b>Lat:</b>        {lat.toFixed(4)}</p>
-                                        <p><b>Lon:</b>        {lon.toFixed(4)}</p>
-                                        <button
-                                            className="popup-profile-btn"
-                                            type="button"
-                                            onClick={() => handleOpenProfile(station)}
-                                            disabled={!hasProfile}
-                                        >
-                                            View Profile
-                                        </button>
-                                    </div>
+                                    <MarkerPopupContent
+                                        station={station}
+                                        lat={lat}
+                                        lon={lon}
+                                        hasProfile={hasProfile}
+                                        eezLoops={eezLoops}
+                                        onOpenProfile={() => handleOpenProfile(station)}
+                                    />
+
                                 </Popup>
                             </Marker>
                         );
