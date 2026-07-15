@@ -49,11 +49,11 @@ INSTRUMENT_CONFIG: dict[str, dict] = {
     "ctd": {
         "data_folder": os.environ.get(
             "SEASNAP_CTD_DATA_FOLDER",
-            "/home/incois/PAJO/pplWorks/Ishita/Final QC/CTD",
+            "/home/ishitha/CTD",
         ),
         "meta_folder": os.environ.get(
             "SEASNAP_CTD_META_FOLDER",
-            "/home/incois/PAJO/pplWorks/Ishita/Final QC/CTD/Metadata/Filtered Metadata",
+            "/home/ishitha/CTD/metadata",
         ),
         "table": "profiles_ctd",
         "column_map": {
@@ -88,11 +88,11 @@ INSTRUMENT_CONFIG: dict[str, dict] = {
     "xbt": {
         "data_folder": os.environ.get(
             "SEASNAP_XBT_DATA_FOLDER",
-            "/home/incois/PAJO/pplWorks/Ishita/Final QC/XBT",
+            "/home/ishitha/XBT",
         ),
         "meta_folder": os.environ.get(
             "SEASNAP_XBT_META_FOLDER",
-            "/home/incois/PAJO/pplWorks/Ishita/Final QC/XBT/metadata",
+            "/home/ishitha/XBT/metadata",
         ),
         "table": "profiles_xbt",
         "column_map": {
@@ -112,11 +112,11 @@ INSTRUMENT_CONFIG: dict[str, dict] = {
     "xctd": {
         "data_folder": os.environ.get(
             "SEASNAP_XCTD_DATA_FOLDER",
-            "/home/incois/PAJO/pplWorks/Ishita/Final QC/XCTD",
+            "/home/ishitha/XCTD",
         ),
         "meta_folder": os.environ.get(
             "SEASNAP_XCTD_META_FOLDER",
-            "/home/incois/PAJO/pplWorks/Ishita/Final QC/XCTD/metadata",
+            "/home/ishitha/XCTD/metadata",
         ),
         "table": "profiles_xctd",
         "column_map": {
@@ -189,7 +189,7 @@ def _folder_mtime(folder: str) -> float:
 
 
 # ==========================================
-# SQLITE CACHE HELPERS
+# SQLITE CACHE HELPERS (profile data)
 # ==========================================
 
 def _meta_key(instrument_type: str, key: str) -> str:
@@ -415,7 +415,7 @@ def ensure_cache(instrument_type: str) -> str:
     return folder
 
 # ==========================================
-# METADATA LOADING
+# METADATA LOADING (parsing helpers)
 # ==========================================
 
 _META_RENAME = {
@@ -523,6 +523,151 @@ def _df_to_stations(df: pd.DataFrame, instrument_type: str) -> list[dict]:
             print(f"[{instrument_type}] Skipping row: {e}")
     return stations
 
+
+# ==========================================
+# STATION METADATA CACHE (SQLite-backed, mirrors profile cache pattern)
+# ==========================================
+# Goal: parse the ~6 lakh line metadata CSVs only once. On subsequent
+# requests / restarts, we check whether the metadata folder's contents
+# have changed (via latest mtime across its CSVs) — if unchanged, we
+# read the already-parsed stations straight out of SQLite instead of
+# re-parsing anything.
+
+def _meta_folder_mtime(folder: str) -> float:
+    """Latest mtime across all metadata CSVs in folder."""
+    if not os.path.isdir(folder):
+        return 0.0
+    files = [
+        os.path.join(folder, f)
+        for f in os.listdir(folder)
+        if f.endswith(".csv")
+    ]
+    return max((os.path.getmtime(f) for f in files), default=0.0)
+
+
+def _station_table(instrument_type: str) -> str:
+    return f"stations_{instrument_type}"
+
+
+STATION_COLUMNS = [
+    "type", "latitude", "longitude", "ship", "cruise",
+    "station", "datetime", "depth", "source", "file_name", "folder_path",
+]
+
+
+def _station_cache_is_current(instrument_type: str, meta_folder: str) -> bool:
+    if not os.path.isfile(CACHE_DB):
+        return False
+    latest = _meta_folder_mtime(meta_folder)
+    try:
+        with sqlite3.connect(CACHE_DB) as conn:
+            rows = dict(conn.execute("SELECT key, value FROM metadata").fetchall())
+    except sqlite3.OperationalError:
+        return False
+    return (
+        rows.get(_meta_key(instrument_type, "meta_source_path")) == meta_folder
+        and float(rows.get(_meta_key(instrument_type, "meta_source_mtime"), -1)) == latest
+    )
+
+
+def _build_station_cache(instrument_type: str) -> list[dict]:
+    """Parse metadata CSVs fresh, persist into SQLite, and return the station list."""
+    df, meta_folder, error = _load_meta_df(instrument_type)
+    if error:
+        print(f"[{instrument_type}] Metadata load error: {error}")
+        stations: list[dict] = []
+    else:
+        stations = _df_to_stations(df, instrument_type)
+
+    table = _station_table(instrument_type)
+    latest_mtime = _meta_folder_mtime(meta_folder)
+
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+    with sqlite3.connect(CACHE_DB) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+        conn.execute(
+            f"""
+            CREATE TABLE {table} (
+                type TEXT, latitude REAL, longitude REAL,
+                ship TEXT, cruise TEXT, station TEXT,
+                datetime TEXT, depth TEXT, source TEXT,
+                file_name TEXT, folder_path TEXT
+            )
+            """
+        )
+
+        if stations:
+            conn.executemany(
+                f"""
+                INSERT INTO {table}
+                ({", ".join(STATION_COLUMNS)})
+                VALUES ({", ".join("?" for _ in STATION_COLUMNS)})
+                """,
+                [tuple(s.get(c) for c in STATION_COLUMNS) for s in stations],
+            )
+
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_file ON {table}(file_name)")
+
+        conn.execute(
+            "INSERT OR REPLACE INTO metadata VALUES (?, ?)",
+            (_meta_key(instrument_type, "meta_source_path"), meta_folder),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO metadata VALUES (?, ?)",
+            (_meta_key(instrument_type, "meta_source_mtime"), str(latest_mtime)),
+        )
+
+    print(f"[{instrument_type}] Station cache built: {len(stations):,} rows.")
+    return stations
+
+
+def _load_station_cache_from_db(instrument_type: str) -> list[dict]:
+    table = _station_table(instrument_type)
+    with sqlite3.connect(CACHE_DB) as conn:
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+        except sqlite3.OperationalError:
+            return []
+    return [dict(row) for row in rows]
+
+
+def ensure_station_cache(instrument_type: str, force: bool = False) -> list[dict]:
+    """
+    Returns the station list for instrument_type, using SQLite as the
+    persistent cache. Only re-parses metadata CSVs when:
+      - force=True (explicit reload requested), or
+      - the metadata folder's contents have changed since last cache build
+        (new file added / existing file modified -> mtime changes).
+    Otherwise, stations are read straight from SQLite — no CSV parsing.
+    """
+    meta_folder = _resolve_meta_folder(instrument_type)
+
+    if not force and _station_cache_is_current(instrument_type, meta_folder):
+        stations = _load_station_cache_from_db(instrument_type)
+        print(
+            f"[{instrument_type}] Station cache is current "
+            f"({len(stations):,} rows) — skipped reparse."
+        )
+    else:
+        stations = _build_station_cache(instrument_type)
+
+    _station_cache[instrument_type] = stations
+    return stations
+
+
 class SpatialBox(BaseModel):
     latMin: float
     latMax: float
@@ -593,23 +738,26 @@ def _validate_type(instrument_type: str) -> None:
         raise HTTPException(status_code=400, detail=f"Unknown instrument type: '{instrument_type}'")
 
 @app.post("/load-meta")
-def load_meta(type: str = Query("ctd")):
+def load_meta(type: str = Query("ctd"), force: bool = Query(False)):
+    """
+    Loads station metadata for the given instrument type.
+
+    By default this is a no-op re-parse: if the metadata folder hasn't
+    changed since the last build, stations are served from the SQLite
+    cache directly. Pass force=true to always re-parse from CSV.
+    """
     instrument_type = type.lower()
     _validate_type(instrument_type)
 
-    df, meta_folder, error = _load_meta_df(instrument_type)
-    if error:
-        _station_cache[instrument_type] = []
-        raise HTTPException(status_code=500, detail=error)
+    stations = ensure_station_cache(instrument_type, force=force)
 
-    stations = _df_to_stations(df, instrument_type)
-    _station_cache[instrument_type] = stations
+    if not stations:
+        raise HTTPException(status_code=500, detail="No valid stations loaded")
 
     return {
-        "type":        instrument_type,
-        "count":       len(stations),
-        "message":     "Metadata loaded successfully",
-        "meta_folder": meta_folder,
+        "type":    instrument_type,
+        "count":   len(stations),
+        "message": "Metadata loaded successfully",
     }
 
 
@@ -618,9 +766,11 @@ def get_stations(type: str = Query("ctd")):
     instrument_type = type.lower()
     _validate_type(instrument_type)
 
-    # Auto-load if not yet in cache
+    # Auto-load if not yet in the in-memory cache for this process.
+    # ensure_station_cache itself will skip re-parsing if SQLite already
+    # has an up-to-date copy for this metadata folder.
     if instrument_type not in _station_cache:
-        load_meta(type=instrument_type)
+        ensure_station_cache(instrument_type)
 
     return {"stations": _station_cache.get(instrument_type, [])}
 
@@ -749,23 +899,22 @@ def get_spatial_profile(box: SpatialBox):
         "data": merged_rows,
     }
 
-# @app.on_event("startup")
-# async def startup():
-#     import threading
-#     import asyncio
+@app.on_event("startup")
+async def startup():
+    import threading
 
-#     def _warm():
-#         # Checkpoint WAL first so reads are fast
-#         if os.path.isfile(CACHE_DB):
-#             with sqlite3.connect(CACHE_DB) as conn:
-#                 conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+    def _warm():
+        # Checkpoint WAL first so reads are fast
+        if os.path.isfile(CACHE_DB):
+            with sqlite3.connect(CACHE_DB) as conn:
+                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
 
-#         for t in ["ctd", "xbt", "xctd"]:
-#             try:
-#                 ensure_cache(t)
-#                 load_meta(type=t)
-#                 print(f"[startup] {t} warmed up")
-#             except Exception as e:
-#                 print(f"[startup] {t} failed: {e}")
+        for t in ["ctd", "xbt", "xctd"]:
+            try:
+                ensure_cache(t)            # profile data cache (unchanged)
+                ensure_station_cache(t)    # metadata cache — skips reparse if unchanged
+                print(f"[startup] {t} warmed up")
+            except Exception as e:
+                print(f"[startup] {t} failed: {e}")
 
-#     threading.Thread(target=_warm, daemon=True).start()
+    threading.Thread(target=_warm, daemon=True).start()

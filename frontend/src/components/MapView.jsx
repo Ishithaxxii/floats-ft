@@ -671,6 +671,16 @@ function QCSummary({ data }) {
 // ==========================================
 // MAIN T-S DIAGRAM
 // ==========================================
+function minMax(arr) {
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < arr.length; i++) {
+        const v = arr[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+    }
+    return [min, max];
+}
+
 function TSDiagram({ data }) {
     if (!data?.length) return null;
 
@@ -694,10 +704,8 @@ function TSDiagram({ data }) {
     const salinities  = validPoints.map(d => d.SAL_QC_VAR);
     const temps       = validPoints.map(d => d.TEMP_QC_VAR);
 
-    const sMin = Math.min(...salinities);
-    const sMax = Math.max(...salinities);
-    const tMin = Math.min(...temps);
-    const tMax = Math.max(...temps);
+    const [sMin, sMax] = minMax(salinities);
+    const [tMin, tMax] = minMax(temps);
 
     // Padding so contour labels aren't clipped at the axis edge
     const sPad = (sMax - sMin) * 0.08 || 0.2;
@@ -880,20 +888,46 @@ function DepthProfile({ data, config }) {
     const [selectedQC, setSelectedQC] = useState({ 1: true, 2: true, 3: true, 4: true, 9: true, all: true });
 
     const qcField = config.qcKey;
-    const sorted  = [...data]
-        .filter(d => d[config.key] != null)
-        .sort((a, b) => b.depSM - a.depSM);
 
-    if (sorted.length === 0) return null;
+    const sorted = useMemo(() => {
+        return [...data]
+            .filter(d => d[config.key] != null)
+            .sort((a, b) => b.depSM - a.depSM);
+    }, [data, config.key]);
 
-    const maxDepth = Math.max(...sorted.map(d => d.depSM));
+    const maxDepth = useMemo(() => {
+        let max = 0;
+        for (let i = 0; i < sorted.length; i++) {
+            if (sorted[i].depSM > max) max = sorted[i].depSM;
+        }
+        return max;
+    }, [sorted]);
+
     const tickStep =
         maxDepth <= 100  ? 10  :
         maxDepth <= 500  ? 50  :
         maxDepth <= 2000 ? 100 : 500;
 
-    const yTicks = [];
-    for (let d = 0; d <= maxDepth; d += tickStep) yTicks.push(d);
+    const yTicks = useMemo(() => {
+        const ticks = [];
+        for (let d = 0; d <= maxDepth; d += tickStep) ticks.push(d);
+        return ticks;
+    }, [maxDepth, tickStep]);
+
+    const renderDot = useCallback((props) => {
+        if (!qcField) return null;
+        const qc = Number(props.payload[qcField]);
+        if (!selectedQC[qc]) return null;
+        return (
+            <circle
+                key={`dot-${props.index}`}
+                cx={props.cx} cy={props.cy} r={5}
+                fill={PROFILE_QC_COLORS[qc]} stroke="#fff" strokeWidth={1}
+            />
+        );
+    }, [qcField, selectedQC]);
+
+    if (sorted.length === 0) return null;
 
     return (
         <div className="profile-chart-card">
@@ -935,7 +969,7 @@ function DepthProfile({ data, config }) {
                         <Label value={config.label} position="insideBottom" offset={-15} fill="#aaa" fontSize={16} />
                     </XAxis>
                     <YAxis
-                        type="number" dataKey="depSM" domain={[maxDepth, 0]} //reversed
+                        type="number" dataKey="depSM" domain={[maxDepth, 0]}
                         ticks={yTicks} stroke="#aaa" tick={{ fill: "#aaa", fontSize: 14 }}
                         width={75} padding={{ top: 10, bottom: 10 }}
                     >
@@ -949,24 +983,17 @@ function DepthProfile({ data, config }) {
                     <Line
                         type="monotone" dataKey={config.key}
                         stroke={config.color} strokeWidth={2}
-                        dot={(props) => {
-                            if (!qcField) return null;
-                            const qc = Number(props.payload[qcField]);
-                            if (!selectedQC[qc]) return null;
-                            return (
-                                <circle
-                                    key={`dot-${props.index}`}
-                                    cx={props.cx} cy={props.cy} r={5}
-                                    fill={PROFILE_QC_COLORS[qc]} stroke="#fff" strokeWidth={1}
-                                />
-                            );
-                        }}
+                        isAnimationActive={false}
+                        dot={renderDot}
                     />
                 </LineChart>
             </ResponsiveContainer>
         </div>
     );
 }
+
+const MemoizedDepthProfile = memo(DepthProfile);
+
 
 // ==========================================
 // INNER PROFILE PANEL (wrapped by error boundary)
@@ -1649,8 +1676,8 @@ export default function MapView({
                         padding: "8px 10px",
                         borderRadius: 6,
                         border: "none",
-                        background: drawMode ? "#2c5f2e" : "#1a6fa8",
-                        color: "#fff",
+                        background: drawMode ? "#37a73b" : "#faf605",
+                        color: "#13043b",
                         cursor: "pointer",
                         boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
                     }}
