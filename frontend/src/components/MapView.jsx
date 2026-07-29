@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, Component, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, Component, useMemo, memo } from "react";
 import {
     MapContainer,
     TileLayer,
@@ -236,6 +236,15 @@ function SpatialBounds({
                     No stations found in this region.
                 </p>
             )}
+
+            {/* Restricted stations note — backend excludes these from the results entirely */}
+            {!spatialLoading && spatialProfileData && spatialProfileData.restricted_count > 0 && (
+                <p style={{ fontSize: "12px", color: "#e6a23c", marginTop: "8px" }}>
+                    {spatialProfileData.restricted_count} station
+                    {spatialProfileData.restricted_count === 1 ? "" : "s"} in this region are inside
+                    the EEZ and require a data requisition — not included above.
+                </p>
+            )}
         </section>
     );
 }
@@ -318,7 +327,6 @@ function InstrumentKey({ activeInstruments, onToggle }) {
 // ==========================================
 // SIDEBAR
 // ==========================================
-// ==========================================
 export function Sidebar({
     stationCount,
     filteredCount,
@@ -398,7 +406,10 @@ export function Sidebar({
     );
 }
 
-function Legend({ activeShip, shipColorMap, ships, onSelectShip, drawMode, onToggleDraw }) {
+function Legend({
+    activeShip, shipColorMap, ships, onSelectShip, drawMode, onToggleDraw,
+    showOutsideEEZ, setShowOutsideEEZ, showInsideEEZ, setShowInsideEEZ,
+}) {
     return (
         <aside className="map-legend">
             <h3>Ships</h3>
@@ -444,6 +455,26 @@ function Legend({ activeShip, shipColorMap, ships, onSelectShip, drawMode, onTog
                 >
                     {drawMode ? "Drawing: Mouse" : "Draw Bounding Box"}
                 </button>
+            </div>
+
+            {/* Inside/Outside EEZ visibility toggle */}
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#ddd" }}>
+                    <input
+                        type="checkbox"
+                        checked={showOutsideEEZ}
+                        onChange={() => setShowOutsideEEZ(v => !v)}
+                    />
+                    Outside EEZ
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#ddd" }}>
+                    <input
+                        type="checkbox"
+                        checked={showInsideEEZ}
+                        onChange={() => setShowInsideEEZ(v => !v)}
+                    />
+                    Inside EEZ
+                </label>
             </div>
         </aside>
     );
@@ -797,6 +828,20 @@ function TSDiagram({ data }) {
 }
 
 const API = "http://localhost:8000";
+const API_KEY = import.meta.env.VITE_API_KEY;
+
+// Shared fetch helper — attaches the API key to every backend call.
+// Use this instead of the raw fetch() for anything hitting `API`.
+// Static/local assets (e.g. /data/*.geojson) don't need this.
+function apiFetch(url, options = {}) {
+    return fetch(url, {
+        ...options,
+        headers: {
+            ...(options.headers || {}),
+            "X-API-Key": API_KEY,
+        },
+    });
+}
 
 // ==========================================
 // PLOT CONFIGS
@@ -1007,7 +1052,7 @@ function ProfilePanel({
 
     onClose
 }) {
-    const [profileResult, setProfileResult] = useState({ stationFile: null, data: [], error: null });
+    const [profileResult, setProfileResult] = useState({ stationFile: null, data: [], error: null, restricted: false });
     const [isLoading,     setIsLoading]     = useState(false);
 
     useEffect(() => {
@@ -1018,6 +1063,7 @@ function ProfilePanel({
             stationFile: "spatial",
             data: spatialData?.data || [],
             error: null,
+            restricted: false,
         });
 
         setIsLoading(false);
@@ -1041,20 +1087,30 @@ function ProfilePanel({
             stationFile
         )}?_=${Date.now()}${typeParam}`;
 
-    fetch(url)
+    apiFetch(url)
             .then(res => {
+                if (res.status === 403) {
+                    // Server-side EEZ restriction — this is the real
+                    // enforcement point, independent of any frontend gating.
+                    return res.json().then(body => {
+                        throw Object.assign(
+                            new Error(body?.detail || "This station requires an approved data requisition."),
+                            { restricted: true }
+                        );
+                    });
+                }
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
             })
             .then(data => {
                 if (!cancelled) {
-                    setProfileResult({ stationFile, data: Array.isArray(data) ? data : [], error: null });
+                    setProfileResult({ stationFile, data: Array.isArray(data) ? data : [], error: null, restricted: false });
                     setIsLoading(false);
                 }
             })
             .catch(err => {
                 if (!cancelled) {
-                    setProfileResult({ stationFile, data: [], error: err.message });
+                    setProfileResult({ stationFile, data: [], error: err.message, restricted: !!err.restricted });
                     setIsLoading(false);
                 }
             });
@@ -1070,6 +1126,7 @@ function ProfilePanel({
 
     const isCurrentProfile = profileResult.stationFile === stationFile;
     const error      = isSpatial ? null : (isCurrentProfile ? profileResult.error : null);
+    const isRestricted = isSpatial ? false : (isCurrentProfile ? profileResult.restricted : false);
     const profileData = isSpatial
         ? (spatialData?.data || [])
         : (isCurrentProfile ? profileResult.data : []);
@@ -1115,8 +1172,21 @@ function ProfilePanel({
                 {/* Spinner while fetching */}
                 {isLoading && <Spinner />}
 
-                {/* Error state */}
-                {!isLoading && error && (
+                {/* Restricted state — server-enforced, separate from generic errors */}
+                {!isLoading && isRestricted && (
+                    <div style={{
+                        margin: "1rem", padding: "12px 14px",
+                        background: "#2a2410", border: "1px solid #6b5a1e",
+                        borderRadius: "6px", color: "#e6c65c", fontSize: "13px",
+                    }}>
+                        🔒 This station is inside the EEZ and requires an approved data
+                        requisition. Submit a request from the marker popup on the map;
+                        the team will email the authorized data once reviewed.
+                    </div>
+                )}
+
+                {/* Generic error state */}
+                {!isLoading && error && !isRestricted && (
                     <p className="profile-status error">Error: {error}</p>
                 )}
 
@@ -1136,6 +1206,13 @@ function ProfilePanel({
                                 <div style={{ color: "#7ec8e3" }}>● CTD: {spatialData.ctd_count}</div>
                                 <div style={{ color: "#f39c12" }}>▲ XBT: {spatialData.xbt_count}</div>
                                 <div style={{ color: "#2ecc71" }}>◆ XCTD: {spatialData.xctd_count}</div>
+                                {spatialData.restricted_count > 0 && (
+                                    <div style={{ color: "#e6a23c", gridColumn: "1 / -1" }}>
+                                        🔒 {spatialData.restricted_count} station
+                                        {spatialData.restricted_count === 1 ? "" : "s"} in this
+                                        region require a data requisition and are excluded.
+                                    </div>
+                                )}
                             </div>
                             )}
                             <TSDiagram data={profileData} />
@@ -1145,7 +1222,7 @@ function ProfilePanel({
                             {availablePlots.length === 0
                                 ? <p className="profile-status">No plottable data found.</p>
                                 : availablePlots.map(cfg => (
-                                    <DepthProfile key={cfg.key} data={profileData} config={cfg} />
+                                    <MemoizedDepthProfile key={cfg.key} data={profileData} config={cfg} />
                                 ))
                             }
                         </div>
@@ -1421,8 +1498,188 @@ function ShiftDragHint({ spatialBounds }) {
     );
 }
 
+// ==========================================
+// DATA REQUISITION FORM (for markers inside EEZ)
+// ==========================================
+function RequisitionForm({ station, onSubmitted, onSubmittedPdfUrl }) {
+    const [form, setForm] = useState({
+        name: "",
+        email: "",
+        organization: "",
+        purpose: "",
+        institutionAddress: "",
+        officerDesignation: "",
+        parameters: "",
+        period: "",
+        projectCost: "",
+        requestType: "own_research",   // "own_research" | "consultancy"
+        govtApprovalDetails: "",
+    });
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState(null);
 
-const REQUISITION_FORM_URL = "https://incois.gov.in/CHANGE_ME/data-requisition"; // ← update with real link
+    const canSubmit = form.name.trim() && form.email.trim() && form.purpose.trim();
+
+    const setField = (field) => (e) => setForm({ ...form, [field]: e.target.value });
+
+    const submit = async () => {
+        if (!canSubmit) {
+            setError("Please fill in name, email, and purpose.");
+            return;
+        }
+        setSubmitting(true);
+        setError(null);
+        try {
+            const res = await apiFetch(`${API}/requisition/submit`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: form.name,
+                    email: form.email,
+                    organization: form.organization,
+                    purpose: form.purpose,
+                    station_file: station.file_name,
+                    instrument_type: station.type,
+                    institution_address: form.institutionAddress,
+                    officer_designation: form.officerDesignation,
+                    parameters: form.parameters,
+                    period: form.period,
+                    project_cost: form.projectCost || null,
+                    request_type: form.requestType,
+                    govt_approval_details: form.requestType === "consultancy"
+                        ? form.govtApprovalDetails
+                        : null,
+                }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            onSubmitted();
+            if (data.request_pdf_url && onSubmittedPdfUrl) {
+                onSubmittedPdfUrl(data.request_pdf_url);
+            }
+        } catch (err) {
+            setError("Submission failed. Please try again.");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const inputStyle = { padding: "4px 6px", fontSize: 12, borderRadius: 4, border: "1px solid #444", width: "100%" };
+    const labelStyle = { fontSize: 11, color: "#aaa", marginBottom: 2, display: "block" };
+
+    return (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div>
+                <span style={labelStyle}>Name *</span>
+                <input value={form.name} onChange={setField("name")} style={inputStyle} />
+            </div>
+
+            <div>
+                <span style={labelStyle}>Email *</span>
+                <input type="email" value={form.email} onChange={setField("email")} style={inputStyle} />
+            </div>
+
+            <div>
+                <span style={labelStyle}>Organization</span>
+                <input value={form.organization} onChange={setField("organization")} style={inputStyle} />
+            </div>
+
+            <div>
+                <span style={labelStyle}>Institution / Dept. Address</span>
+                <input value={form.institutionAddress} onChange={setField("institutionAddress")} style={inputStyle} />
+            </div>
+
+            <div>
+                <span style={labelStyle}>Officer Designation</span>
+                <input value={form.officerDesignation} onChange={setField("officerDesignation")} style={inputStyle} placeholder="e.g. Research Intern" />
+            </div>
+
+            <div>
+                <span style={labelStyle}>Parameters Needed</span>
+                <input value={form.parameters} onChange={setField("parameters")} style={inputStyle} placeholder="e.g. Temperature, Salinity, Depth" />
+            </div>
+
+            <div>
+                <span style={labelStyle}>Period</span>
+                <input value={form.period} onChange={setField("period")} style={inputStyle} placeholder="e.g. Jan 2023 - Mar 2023" />
+            </div>
+
+            <div>
+                <span style={labelStyle}>Purpose of request *</span>
+                <textarea
+                    value={form.purpose}
+                    onChange={setField("purpose")}
+                    rows={2}
+                    style={{ ...inputStyle, resize: "vertical" }}
+                    placeholder="Project this data is required for"
+                />
+            </div>
+
+            <div>
+                <span style={labelStyle}>Estimated project cost (optional)</span>
+                <input value={form.projectCost} onChange={setField("projectCost")} style={inputStyle} />
+            </div>
+
+            {/* The data is required for — maps to the official form's own-research vs consultancy question */}
+            <div>
+                <span style={labelStyle}>This data is required for</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#ddd" }}>
+                        <input
+                            type="radio"
+                            name="requestType"
+                            value="own_research"
+                            checked={form.requestType === "own_research"}
+                            onChange={setField("requestType")}
+                        />
+                        Own research
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#ddd" }}>
+                        <input
+                            type="radio"
+                            name="requestType"
+                            value="consultancy"
+                            checked={form.requestType === "consultancy"}
+                            onChange={setField("requestType")}
+                        />
+                        Sponsored & consultancy projects*
+                    </label>
+                </div>
+            </div>
+
+            {/* Only shown for consultancy — mirrors the official form's conditional question */}
+            {form.requestType === "consultancy" && (
+                <div>
+                    <span style={labelStyle}>
+                        Government approval details (Central/State), if obtained
+                    </span>
+                    <textarea
+                        value={form.govtApprovalDetails}
+                        onChange={setField("govtApprovalDetails")}
+                        rows={2}
+                        style={{ ...inputStyle, resize: "vertical" }}
+                    />
+                </div>
+            )}
+
+            {error && (
+                <p style={{ color: "#e74c3c", fontSize: 11, margin: 0 }}>{error}</p>
+            )}
+
+            <button
+                type="button"
+                onClick={submit}
+                disabled={submitting}
+                style={{
+                    padding: "6px 0", background: "#1a6fa8", color: "#fff",
+                    border: "none", borderRadius: 4, fontSize: 12, cursor: "pointer",
+                }}
+            >
+                {submitting ? "Submitting…" : "Submit Request"}
+            </button>
+        </div>
+    );
+}
 
 function MarkerPopupContent({ station, lat, lon, hasProfile, eezLoops, onOpenProfile }) {
     const insideEEZ = useMemo(
@@ -1431,19 +1688,37 @@ function MarkerPopupContent({ station, lat, lon, hasProfile, eezLoops, onOpenPro
     );
 
     const [csvState, setCsvState] = useState({
-        loading: false, error: null, showRequisition: false,
+        loading: false, error: null, showRequisition: false, requisitionSubmitted: false,
     });
+
+    // Holds the backend's request_pdf_url once a requisition has been
+    // submitted, plus loading/error state for the download click itself.
+    const [requisitionPdf, setRequisitionPdf] = useState({
+        url: null, downloading: false, error: null,
+    });
+
+    const handleViewProfileClick = () => {
+        if (insideEEZ) {
+            setCsvState(prev => ({ ...prev, showRequisition: true, error: null }));
+            return;
+        }
+        onOpenProfile();
+    };
 
     const handleDownloadClick = async () => {
         if (insideEEZ) {
-            setCsvState({ loading: false, error: null, showRequisition: true });
+            setCsvState(prev => ({ ...prev, showRequisition: true, error: null }));
             return;
         }
-        setCsvState({ loading: true, error: null, showRequisition: false });
+        setCsvState({ loading: true, error: null, showRequisition: false, requisitionSubmitted: false });
         try {
             const typeParam = station.type ? `&type=${station.type}` : "";
             const url = `${API}/profile/${encodeURIComponent(station.file_name)}?_=${Date.now()}${typeParam}`;
-            const res = await fetch(url);
+            const res = await apiFetch(url);
+            if (res.status === 403) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || "This station requires an approved data requisition.");
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             const rows = Array.isArray(data) ? data : [];
@@ -1451,13 +1726,36 @@ function MarkerPopupContent({ station, lat, lon, hasProfile, eezLoops, onOpenPro
 
             const csv = jsonToCSV(rows);
             const safeName = (station.file_name)
-            //const safeName = (station.station || station.file_name || "station")
                 .replace(/[^a-z0-9_-]/gi, "_");
             triggerCSVDownload(`${safeName}_${station.type || "data"}.csv`, csv);
 
-            setCsvState({ loading: false, error: null, showRequisition: false });
+            setCsvState({ loading: false, error: null, showRequisition: false, requisitionSubmitted: false });
         } catch (err) {
-            setCsvState({ loading: false, error: err.message, showRequisition: false });
+            setCsvState({ loading: false, error: err.message, showRequisition: false, requisitionSubmitted: false });
+        }
+    };
+
+    // Downloads the autofilled requisition PDF via apiFetch (needs the
+    // X-API-Key header, so a plain <a href> won't work) and triggers a
+    // browser download, same pattern as the CSV download above.
+    const handleDownloadRequisitionPdf = async () => {
+        if (!requisitionPdf.url) return;
+        setRequisitionPdf(prev => ({ ...prev, downloading: true, error: null }));
+        try {
+            const res = await apiFetch(`${API}${requisitionPdf.url}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = blobUrl;
+            a.download = `${station.file_name || "requisition"}_form.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
+            setRequisitionPdf(prev => ({ ...prev, downloading: false }));
+        } catch (err) {
+            setRequisitionPdf(prev => ({ ...prev, downloading: false, error: "Download failed. Please try again." }));
         }
     };
 
@@ -1476,8 +1774,9 @@ function MarkerPopupContent({ station, lat, lon, hasProfile, eezLoops, onOpenPro
                 <button
                     className="popup-profile-btn"
                     type="button"
-                    onClick={onOpenProfile}
+                    onClick={handleViewProfileClick}
                     disabled={!hasProfile}
+                    title={insideEEZ ? "Inside EEZ — requisition required" : "View this marker's profile"}
                 >
                     View Profile
                 </button>
@@ -1499,23 +1798,58 @@ function MarkerPopupContent({ station, lat, lon, hasProfile, eezLoops, onOpenPro
                 </p>
             )}
 
-            {csvState.showRequisition && (
+            {csvState.showRequisition && !csvState.requisitionSubmitted && (
                 <div style={{
                     marginTop: "8px", padding: "8px", background: "#1f2330",
                     borderRadius: "5px", fontSize: "12px", color: "#ddd",
                 }}>
                     <p style={{ margin: "0 0 6px" }}>
-                        This marker lies inside the Indian EEZ. Please submit a data
-                        requisition form to obtain this CSV.
+                        This marker lies inside the Indian EEZ. Please fill out this
+                        request form — our team will review it and, once approved and
+                        signed, send the authorized data directly to your email.
                     </p>
-                    <a
-                        href={REQUISITION_FORM_URL}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "#3498db", fontWeight: "bold" }}
-                    >
-                        Open Requisition Form →
-                    </a>
+                    <RequisitionForm
+                        station={station}
+                        onSubmitted={() =>
+                            setCsvState(prev => ({ ...prev, requisitionSubmitted: true }))
+                        }
+                        onSubmittedPdfUrl={(url) =>
+                            setRequisitionPdf({ url, downloading: false, error: null })
+                        }
+                    />
+                </div>
+            )}
+
+            {csvState.requisitionSubmitted && (
+                <div style={{
+                    marginTop: "8px", padding: "8px", background: "#1f3320",
+                    borderRadius: "5px", fontSize: "12px", color: "#a8e6a1",
+                }}>
+                    <p style={{ margin: "0 0 8px" }}>
+                        ✓ Request submitted. Our team has been notified and will email
+                        you the signed authorization once reviewed. We've also emailed
+                        you a copy of your filled request form.
+                    </p>
+
+                    {requisitionPdf.url && (
+                        <button
+                            type="button"
+                            onClick={handleDownloadRequisitionPdf}
+                            disabled={requisitionPdf.downloading}
+                            style={{
+                                padding: "6px 10px", background: "#1a6fa8", color: "#fff",
+                                border: "none", borderRadius: 4, fontSize: 12, cursor: "pointer",
+                            }}
+                        >
+                            {requisitionPdf.downloading ? "Preparing…" : "⬇ Download your filled form (PDF)"}
+                        </button>
+                    )}
+
+                    {requisitionPdf.error && (
+                        <p style={{ color: "#e74c3c", fontSize: "11px", marginTop: "6px" }}>
+                            {requisitionPdf.error}
+                        </p>
+                    )}
                 </div>
             )}
         </div>
@@ -1543,9 +1877,12 @@ export default function MapView({
     const [eezLoops,   setEezLoops]   = useState([]);
     const [previewBox, setPreviewBox] = useState(null);
     const [drawMode, setDrawMode] = useState(false);
-
-    // Track the full selected station so ProfilePlots gets type too
     const [profileStation, setProfileStation] = useState(null);
+
+    // EEZ visibility toggle — outside EEZ visible by default (directly downloadable);
+    // inside EEZ also visible by default, but its markers require the requisition flow.
+    const [showOutsideEEZ, setShowOutsideEEZ] = useState(true);
+    const [showInsideEEZ, setShowInsideEEZ] = useState(true);
 
     useEffect(() => {
         fetch("/data/india_eez.geojson")
@@ -1557,9 +1894,22 @@ export default function MapView({
     const shipColorMap = generateShipColorMap(stations);
     const ships        = Object.keys(shipColorMap);
 
-    const filteredStations = activeShip === "all"
+    // Ship filter first (existing behavior)
+    const shipFilteredStations = activeShip === "all"
         ? stations
         : stations.filter(s => s.ship === activeShip);
+
+    // Then EEZ inside/outside visibility toggle
+    const eezFilteredStations = useMemo(() => {
+        if (!eezLoops.length) return shipFilteredStations;
+        return shipFilteredStations.filter(s => {
+            const lat = Number(s.latitude);
+            const lon = Number(s.longitude);
+            if (isNaN(lat) || isNaN(lon)) return false;
+            const inside = isPointInEEZ(lat, lon, eezLoops);
+            return inside ? showInsideEEZ : showOutsideEEZ;
+        });
+    }, [shipFilteredStations, eezLoops, showInsideEEZ, showOutsideEEZ]);
 
     const handleBoxChange = useCallback((bounds, phase) => {
         if (phase === "drawing") {
@@ -1620,7 +1970,7 @@ export default function MapView({
 
                 {/* Station markers — shape by instrument, color by ship */}
                 <>
-                    {filteredStations.map((station, index) => {
+                    {eezFilteredStations.map((station, index) => {
                         const lat = Number(station.latitude);
                         const lon = Number(station.longitude);
                         if (isNaN(lat) || isNaN(lon)) return null;
@@ -1666,6 +2016,10 @@ export default function MapView({
                 onSelectShip={setActiveShip}
                 drawMode={drawMode}
                 onToggleDraw={toggleDrawMode}
+                showOutsideEEZ={showOutsideEEZ}
+                setShowOutsideEEZ={setShowOutsideEEZ}
+                showInsideEEZ={showInsideEEZ}
+                setShowInsideEEZ={setShowInsideEEZ}
             />
 
             {/* Floating draw-mode toggle (right side) */}

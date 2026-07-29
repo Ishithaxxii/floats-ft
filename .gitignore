@@ -19,6 +19,8 @@ backend/uploads/
 
 # Environment
 .env
+backend/.env
+frontend/.env
 *.env
 
 # OS

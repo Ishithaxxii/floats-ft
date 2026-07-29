@@ -3,6 +3,18 @@ import "./App.css";
 import MapView, { Navbar, Sidebar } from "./components/MapView";
 
 const API = "http://localhost:8000";
+const API_KEY = import.meta.env.VITE_API_KEY;
+
+function apiFetch(url, options = {}) {
+    return fetch(url, {
+        ...options,
+        headers: {
+            ...(options.headers || {}),
+            "X-API-Key": API_KEY,
+        },
+    });
+}
+
 const INSTRUMENT_TYPES = ["ctd", "xbt", "xctd"];
 
 function getTwoYearsAgo() {
@@ -44,8 +56,8 @@ function App() {
         setLoadingTypes(prev => ({ ...prev, [instrType]: true }));
         setErrors(prev => ({ ...prev, [instrType]: null }));
         try {
-            await fetch(`${API}/load-meta?type=${instrType}`, { method: "POST" });
-            const res  = await fetch(`${API}/stations?type=${instrType}`);
+            await apiFetch(`${API}/load-meta?type=${instrType}`, { method: "POST" });
+            const res  = await apiFetch(`${API}/stations?type=${instrType}`);
             const data = await res.json();
             const incoming = data.stations || [];
             setStations(prev => [
@@ -166,7 +178,7 @@ function App() {
         setSpatialLoading(true);
         setShowSpatialProfile(false);
 
-        fetch(`${API}/spatial-profile`, {
+        apiFetch(`${API}/spatial-profile`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -187,7 +199,6 @@ function App() {
                 setSpatialLoading(false);
             });
     }, [spatialBounds, dateFrom, dateTo]);
-
     // Only reset when box is cleared — no auto-fetch on draw
     useEffect(() => {
         if (!spatialBounds) {
